@@ -39,6 +39,7 @@ class greensFunction:
 	def getw(Nc,stat,T,n):
 		return -(2*Nc-(1-stat)/2-2*n)*np.pi*T
 
+	# Nx,Ny are even, i=Nx/2-1 is k=0. Eg. Nx=4: k=pi*(-.5, 0, .5, 1)
 	def getk(self,Nk,n):
 		return -np.pi+2*np.pi*(n+1)/Nk
 
@@ -71,7 +72,7 @@ class greensFunction:
 				trim1=(trim-1)/2
 				trim2=(trim+1)/2
 			res=np.fft.ifftn(np.fft.fftn(np.concatenate((self.v,z1)))*np.fft.fftn(np.concatenate((g2.v,z2))))
-			v=np.roll(np.roll(res[trim1:len(res)-trim2],-((self.Nx-1)/2),axis=1),-((self.Ny-1)/2),axis=2)
+			v=np.roll(np.roll(res[trim1:len(res)-trim2],-((self.Nx+1)/2),axis=1),-((self.Ny+1)/2),axis=2)
 		else:
 			if stat==1:
 				mt=(Nt-1)/2
@@ -91,7 +92,7 @@ class greensFunction:
 	@staticmethod
 	def convolvePeriodic(a,b):
 		#print (a,b)
-		return convolve2d(a,b,boundary='wrap',mode='same')
+		return np.roll(np.roll(convolve2d(a,b,boundary='wrap',mode='same'),-1,axis=0),-1,axis=1)
 		#return a*b
 
 	def dot(self,g2):
@@ -150,8 +151,6 @@ def eps(kx,ky,couplings):
 	return -2*tx*np.cos(kx)-2*ty*np.cos(ky)-2*t2*np.cos(kx+ky)
 
 def test():
-	print convolve2d([[1,2,3,4]],[[1,2,3,4]],boundary='wrap',mode='same')
-	exit(0)
 
 	f1=greensFunction(-1,1.,v=[[[1,2],[3,4]],[[5,6],[7,8]]])
 	f2=greensFunction(-1,1.,v=[[[9,10],[11,12]],[[5,6+3j],[7,8]]])
@@ -175,24 +174,21 @@ def test():
 		assert (a1-a3).dot((a1-a3))<1e-15; print ' * passed fft'
 		a4=g2.__mul__(g1,fft=True)
 		assert (a1-a4).dot((a1-a4))<1e-15; print ' * passed fft reverse'
-
-	print (f1*f2).v[(Ntb-1)/2,Nx/2,Ny/2]*f1.Nx*f2.Ny/f1.T
-	print f1.dot(f2.reverse())
-	print abs((f1*f2).v[(Ntb-1)/2,Nx/2,Ny/2]-f1.dot(f2.reverse()))
-	assert abs((f1*f2).v[(Ntb-1)/2,Nx/2,Ny/2]*f1.Nx*f2.Ny/f1.T-f1.dot(f2.reverse()))<1e-10; print ' * passed dot-reverse/conv comparison'
+		if a1.stat==1:
+			assert abs((g1*g2).v[(Ntb-1)/2,Nx/2-1,Ny/2-1]*Nx*Ny/g1.T-g1.dot(g2.reverse()))<1e-10; print ' * passed dot-reverse/conv comparison'
 
 def main():
 	# Nc=2048
 	# Nx=128
 	# Ny=64
-	Nc=1024
+	Nc=512
 	Nx=128
 	Ny=64
 
 	mu=0
 	tx=1
-	ty=.1*tx
-	t2=.1*tx
+	ty=.4*tx
+	t2=.4*tx
 	T=0.04*tx
 	St=.97
 	
@@ -230,16 +226,17 @@ def main():
 	shift=3
 	import pylab as pl
 	pl.ion()
-
+	G2=G**G.reverse()
 	while True:
-		v2=Vsa*((G**G.reverse())**v)+shift*v
+		print "Applying operator..."
+		v2=Vsa*(G2**v)+shift*v
 		n=np.sqrt(v2.dot(v2))
-		print v.dot(v2)-shift
+		print "Largest eigenvalue estimate: %s"%(v.dot(v2)-shift)
 		v=v2/n
 		pl.cla()
 		CS =pl.contour(Nx*Ny*v.v[Nc].real,colors='k')
 		pl.clabel(CS, fontsize=9, inline=1)
-		pl.pause(0.5)
+		pl.pause(0.1)
 	
 
 	return
