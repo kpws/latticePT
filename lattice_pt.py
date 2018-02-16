@@ -173,6 +173,13 @@ def test():
 		assert a1.dot(a1)<1e-15; print ' * passed  g-g = 0'
 		a1=g.reverse().reverse()-g
 		assert a1.dot(a1)<1e-15; print ' * passed  double reverse'
+		if g.stat==1:
+			assert (g-g.reverse()).v[(Ntb-1)/2,Nx/2-1,Ny/2-1]==0;
+		else:
+			assert (g.reverse().v[Ntf/2,Nx/2-1,Ny/2-1]==g.v[Ntf/2-1,Nx/2-1,Ny/2-1]
+					and
+					g.reverse().v[Ntf/2-1,Nx/2-1,Ny/2-1]==g.v[Ntf/2,Nx/2-1,Ny/2-1]);
+		print ' * passed reverse center fixed'
 	for (g1,g2,name) in [(f1,f2,'ff'), (b1,b2,'bb'), (f1,b1,'fb'), (b2,f1,'bf')]:
 		print name+':'
 		a1=g1.__mul__(g2,fft=False)
@@ -185,37 +192,11 @@ def test():
 		if a1.stat==1:
 			assert abs((g1*g2).v[(Ntb-1)/2,Nx/2-1,Ny/2-1]*Nx*Ny/g1.T-g1.dot(g2.reverse()))<1e-10; print ' * passed dot-reverse/conv comparison'
 
-def arnoldi_iteration(A,b,nimp):
-	"""
-	Input
-	A: (nxn matrix)
-	b: (initial vector)
-	nimp: number of iterations
-	"""
-
-	h = np.zeros((nimp+1, nimp),dtype=complex)    # Creates a zero matrix of shape (n+1)x n
-
-	q  = b/np.sqrt(b.dot(b))      # Normilize the intput vector
-	Q = [q]                     # Adds q to the first column of Q
-
-	for n in range(nimp):
-		print 'Arnoldi n=%s'%n           
-		v = A(q)                # A*q_0
-		for j in range(n+1):
-			h[j, n] = Q[j].dot(v,con=False) #maybe without cc?      
-			# print h[j, n]
-			v = v - h[j,n]*Q[j]   
-
-		h[n+1, n] = np.sqrt(v.dot(v))
-		q = v / h[n+1, n]
-		Q.append(q)
-	return Q, h
-
 def main():
 	# Nc=2048
 	# Nx=128
 	# Ny=64
-	Nc=256
+	Nc=512
 	Nx=128
 	Ny=64
 	tx=1
@@ -241,8 +222,8 @@ def main():
 	ty=x*tx
 	t2=x*tx
 	St=None
-	
-	
+
+
 	kxs=np.array([[-np.pi+(i+1)*2*np.pi/Nx for i in range(Nx)],]*Ny).transpose()
 	kys=np.array([[-np.pi+(i+1)*2*np.pi/Ny for i in range(Ny)],]*Nx)
 	wsf=[greensFunction.getw(Nc,-1,T,i) for i in range(2*Nc)]
@@ -275,9 +256,9 @@ def main():
 		CS =pl.contour(kxs,kys,z,colors='k')
 		pl.clabel(CS, fontsize=9, inline=1)
 
-	pl.figure(0)
-	plotBZ(eps)
-	pl.draw()
+	# pl.figure(0)
+	# plotBZ(eps)
+	# pl.draw()
 
 	print "Generating G..."
 	G=greensFunction(-1,T,v=[1/(1j*w-eps) for w in wsf])
@@ -289,104 +270,58 @@ def main():
 		chi0max=chi0.v.max()
 		print "chi0 max: "+str(chi0max)
 		U=St/chi0max.real
-		print " => U= "+str(U/tx)+' tx'
+		print "St=%s => U= "%St+str(U/tx)+' tx'
+
+	print 'Nc=%s'%Nc
+	print 'Nx=%s'%Nx
+	print 'Ny=%s'%Ny
+	print 'T=%stx'%(T/tx)
+	print 'U=%stx'%(U/tx)
+	print 'ty=%stx'%(ty/tx)
+	print 't2=%stx'%(t2/tx)
 
 	chis=chi0/(1-U*chi0)
 	chic=chi0/(1+U*chi0)
 	Vsa=U+(3./2)*(U**2)*chis-(1./2)*(U**2)*chic
 	Vta=-1./2*(U**2)*chis-1./2*(U**2)*chic
 
-	# pl.figure(3)
-	# CS =pl.contour(kxs,kys,chis.v.real[Nc-1],colors='k')
-	# pl.clabel(CS, fontsize=9, inline=1)
-	# pl.show()
-
-	# pl.figure(3)
-	# #Q=(pi,pi/2)
-	# pl.plot(wsb,Vsa.v[:,Nx-1,Ny*3/4-1].real)
-	# pl.show()
-
 	print "Finding linearized gap equation solutions..."
 	v=greensFunction(-1,T,v=np.random.rand(2*Nc,Nx,Ny))
 
 	G2=G**(G.reverse())
 
-	Nvals=4
+	Nvals=8
 	Ntf=2*Nc
-	def linOp(x):
-		print '*'
-		return (-Vsa*(G2**greensFunction(-1,T,v=x.reshape(Ntf,Nx,Ny)))).v.flatten()
+	for S in [0,1]:
+		if S==0:
+			print 'Singlet:'
+		else:
+			print 'Triplet:'
+		i=0
+		def linOp(x):
+			print '{0}\r'.format(i),
+			# i=i+1
+			return (-(Vta if S==1 else Vsa)*(G2**greensFunction(-1,T,v=x.reshape(Ntf,Nx,Ny)))).v.flatten()		
+		A=LinearOperator((Ntf*Nx*Ny,Ntf*Nx*Ny),linOp)
+		vals, vecs = eigs(A, k=Nvals,tol=1e-6,which='LR')
+		inds = (-vals.real).argsort()
 
-	A=LinearOperator((Ntf*Nx*Ny,Ntf*Nx*Ny),linOp)
-	vals, vecs = eigs(A, k=Nvals,tol=1e-6,which='LR')
-	for i in range(Nvals):
-		vi=vecs[:,i].reshape(Ntf,Nx,Ny)
-		Tsym=vi[Ntf*3/4,Nx*3/4-1,Ny*3/4-1]/vi[Ntf*1/4,Nx*3/4-1,Ny*3/4-1]
-		Psym=vi[Ntf*3/4,Nx*3/4-1,Ny*3/4-1]/vi[Ntf*3/4,Nx*1/4-1,Ny*1/4-1]
-		print Tsym
-		print Psym
-		print ('O' if Tsym.real<0 else 'E')+'S'+('O' if Psym.real<0 else 'E')+' lambda=%s'%vals[i]
-		pl.figure(2*i+1)
-		plotBZ(Nx*Ny*vi[Nc].real)
-		# pl.figure(2*i+2)
-		# plotBZ(Nx*Ny*vi[Nc-1].real)
-	pl.show()
+		for j in range(Nvals):
+			i=inds[j]
+			vi=vecs[:,i].reshape(Ntf,Nx,Ny)
+			Tsym=vi[Ntf*3/4-1,Nx*3/4-1,Ny*3/4-1]/vi[Ntf*1/4-1,Nx*3/4-1,Ny*3/4-1]
+			Psym=vi[Ntf*3/4-1,Nx*3/4-1,Ny*3/4-1]/vi[Ntf*3/4-1,Nx*1/4-1,Ny*1/4-1]
+			if Tsym*Psym*(2*S-1)<0:
+				print ' '+('O' if Tsym.real<0 else 'E')+('T' if S==1 else 'S')+('O' if Psym.real<0 else 'E')+' lambda = %s'%vals[i]
+			else:
+				print '('+('O' if Tsym.real<0 else 'E')+('T' if S==1 else 'S')+('O' if Psym.real<0 else 'E')+')'
+			# pl.figure(2*i+1)
+			# plotBZ(Nx*Ny*vi[Nc].real)
+			# pl.figure(2*i+2)
+			# plotBZ(Nx*Ny*vi[Nc-1].real)
+		pl.show()
 	return
 
-	pl.ion()
-	Q,h=arnoldi_iteration(lambda x:-Vsa*(G2**x),v,36)
-	print h
-	lam,w  =np.linalg.eig(h[:-1,:])
-	print lam
-
-	while True:
-		print "Applying operator..."
-		v2=-Vsa*(G2**v)+shift*v
-		n=np.sqrt(v2.dot(v2))
-		print "Largest eigenvalue estimate: %s"%(v.dot(v2)-shift)
-		v=v2/n
-		pl.figure(0)
-		pl.cla()
-		CS =pl.contour(kxs,kys,Nx*Ny*v.v[Nc].real,colors='k')
-		pl.clabel(CS, fontsize=9, inline=1)
-		# pl.figure(1)
-		# pl.cla()
-		# CS =pl.contour(kxs,kys,Nx*Ny*v.v[Nc-1].real,colors='k')
-		# pl.clabel(CS, fontsize=9, inline=1)
-		pl.pause(0.1)
-	
-
-	return
-
-
-	Deltas=[]
-	for i in range(4):
-		Deltas.append(eigen(lambda D:Vsa*((G**G.reverse())**D)-sum(d[1]*D.dot(d[1]) for d in Deltas), G**G))
-	print [d[0] for d in Deltas]
-
-
-	import pylab as pl
-	pl.figure()
-	ws,kxs,kys=fermionicGrid(model)	
-	X, Y = np.meshgrid(kxs, kys)
-	CS = pl.contour(X, Y, [[eps(kx,ky,model[2])-mu for kx in kxs] for ky in kys], np.linspace(-3,3,13),colors='k',)
-	pl.clabel(CS, fontsize=9, inline=1)
-
-
-	g0=G0vec(model)
-	chi0=Chi0(g0,model)
-	
-	print chi0[Nc+30,23,3]
-	print singleFreeChi0(Nc+30,23,3,model)
-
-	chis=chi0/(1-U*chi0)
-	chic=chi0/(1+U*chi0)
-	Vsa=U+3./2*U**2*chis-1./2*U**2*chic
-	
-	pl.figure()
-	pl.plot(np.transpose(Vsa[0,0:-1:4].real))
-
-	#pl.show()
 
 if __name__ == "__main__":
 	test()
