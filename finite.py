@@ -89,14 +89,16 @@ def iToCoord(sys,i):
 def addToMultiState(ms,ps):
 	if ps.amp==0:
 		return
+
 	ps.canonicalize()
-	for i in range(len(ms)):
-		if ms[i].same(ps):
-			ms[i].amp+=ps.amp
-			if ms[i].amp==0:
-				ms.pop(i)
-			return
-	ms.append(ps)
+
+	if tuple(ps.state) in ms:
+		ms[tuple(ps.state)]+=ps.amp
+	else:
+		ms[tuple(ps.state)]=ps.amp
+
+	if ms[tuple(ps.state)]==0:	
+		ms.pop(tuple(ps.state))
 
 def symmetrize(sys,psi,group,rep):
 	out=[]
@@ -108,13 +110,14 @@ def symmetrize(sys,psi,group,rep):
 
 def inner(a,b):
 	acc=0
-	for i in a:
-		for j in b:
-			if i.same(j):
-				acc+=np.conj(i.amp)*j.amp
+	for state,amp in b.items():
+		if tuple(state) in a:
+			acc+=np.conj(a[state])*amp
 	return acc
+
 def fac(n):
 	return 1 if n==0 else n*fac(n-1)
+
 def binom(a,b):
 	return fac(a)//fac(a-b)//fac(b)
 
@@ -164,7 +167,7 @@ def main():
 
 	# apply symmetry transfs
 	# spin flip
-	psi=[psi]
+	psi={tuple(psi.state):psi.amp}
 	print(psi)
 	
 	identity=lambda x:x
@@ -177,13 +180,14 @@ def main():
 
 	tx=1
 	ty=0
-	U=1.7
-	shift=-3
+	U=2
+	shift=-6
 	krylov=[psi]
 	nold=1
-	for it in range(30):
-		newPsi=[]
-		for p in psi:
+	for it in range(40):
+		newPsi={}
+		for pstate,pamp in psi.items():
+			p=ProdState(pamp,pstate)
 			p2=ProdState(shift*p.amp,p.state)
 			addToMultiState(newPsi,p2)
 			for ix in range(nx):
@@ -212,7 +216,6 @@ def main():
 						p2=p.c(iy1).cd(i0)
 						p2.amp*=ty
 						addToMultiState(newPsi,p2)
-
 		print("before: "+str(len(newPsi))+"/"+str(nSubStates))
 
 		# for k in krylov:
@@ -222,7 +225,7 @@ def main():
 		# 		addToMultiState(newPsi,p2)
 		# print("after: "+str(len(newPsi))+"/"+str(nSubStates))
 		n=inner(newPsi,newPsi)
-		if it>20:
+		if it>38:
 			for deltaX in range(nx):
 				x1=0
 				x1p=1
@@ -243,37 +246,39 @@ def main():
 				ppairppair=0
 				densdens=0
 				uddensdens=0
-				for p2 in newPsi:
+				for pstate,pamp in newPsi.items():
+					p2=ProdState(pamp,pstate)
 					s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
 					s2.canonicalize()
-					pairpair+=inner(newPsi,  [s2])
+					pairpair+=inner(newPsi,  {tuple(s2.state):s2.amp})
 
 					s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
 					s2.canonicalize()
-					ppairppair+=inner(newPsi,  [s2])
+					ppairppair+=inner(newPsi,  {tuple(s2.state):s2.amp})
 
 					s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
 					s2.canonicalize()
-					densdens+=inner(newPsi,  [s2])
+					densdens+=inner(newPsi,  {tuple(s2.state):s2.amp})
 
 					s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
 					s2.canonicalize()
-					uddensdens+=inner(newPsi,  [s2])
+					uddensdens+=inner(newPsi,  {tuple(s2.state):s2.amp})
 						# print(pairpair)
+				upnavg=1/2
+				downnavg=1/2
 				print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair/n))
 				print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair/n))
-				print("Dx="+str(deltaX)+",     dens dens: "+str(densdens/n))
-				print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens/n))
+				print("Dx="+str(deltaX)+",     dens dens: "+str(densdens/n-upnavg*upnavg))
+				print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens/n-upnavg*downnavg))
 				print()
 
-		
 		lam=inner(psi,newPsi)
-
 		assert(lam<0)
 		print("eig: "+str(lam-shift))
 
-		for p in newPsi:
-			p.amp/=np.sqrt(n)
+		nn=np.sqrt(n)
+		for key in newPsi:
+		 newPsi[key]/=nn
 
 		# krylov.append(newPsi)
 
