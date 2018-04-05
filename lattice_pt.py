@@ -178,31 +178,35 @@ def test():
 		if a1.stat==1:
 			assert abs((g1*g2).v[(Ntb-1)//2,Nx//2-1,Ny//2-1]*Nx*Ny/g1.T-g1.dot(g2.reverse()))<1e-10; print(' * passed dot-reverse/conv comparison')
 
-def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,U=None,St=None):
+def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None):
 	kxs=np.array([[-np.pi+(i+1)*2*np.pi/Nx for i in range(Nx)],]*Ny).transpose()
 	kys=np.array([[-np.pi+(i+1)*2*np.pi/Ny for i in range(Ny)],]*Nx)
 	wsf=[greensFunction.getw(Nc,-1,T,i) for i in range(2*Nc)]
 	wsb=[greensFunction.getw(Nc,1,T,i) for i in range(2*Nc-1)]
+	print(wsf)
+	if linearized: #half filling, low energy limit
+		eps=-2*tx*(np.abs(kxs)-np.pi/2)
+	else:
+		mu=0
+		muu=2*tx+2*ty+2*t2
+		mul=-muu
+		ok=False
+		Npgoal=int(filling*Nx*Ny)
+		while not ok:
+			eps=-2*tx*np.cos(kxs)-2*ty*np.cos(kys)-2*t2*np.cos(kxs+kys)-mu
+			Np=(0 >= eps).sum()
+			Nh=(0 < eps).sum()
+			assert Np+Nh==Nx*Ny
+			if Npgoal==Np or abs(muu-mul)<1e-9:
+				ok=True
+			if Np<Npgoal:
+				mul=mu
+				mu=(mu+muu)/2
+			if Np>Npgoal:
+				muu=mu
+				mu=(mu+mul)/2
 
 	mu=0
-	muu=2*tx+2*ty+2*t2
-	mul=-muu
-	ok=False
-	Npgoal=int(filling*Nx*Ny)
-	while not ok:
-		eps=-2*tx*np.cos(kxs)-2*ty*np.cos(kys)-2*t2*np.cos(kxs+kys)-mu
-		Np=(0 >= eps).sum()
-		Nh=(0 < eps).sum()
-		assert Np+Nh==Nx*Ny
-		if Npgoal==Np or abs(muu-mul)<1e-9:
-			ok=True
-		if Np<Npgoal:
-			mul=mu
-			mu=(mu+muu)/2
-		if Np>Npgoal:
-			muu=mu
-			mu=(mu+mul)/2
-
 	# pl.figure(0)
 	# plotBZ(eps)
 	# pl.draw()
@@ -258,39 +262,142 @@ def gl(a):
 	T=a[6]
 	U=a[7]
 	St=a[8]
-	return getLambdas(Nc,Nx,Ny,tx,tx*x,tx*x,filling,T,U=U,St=St)
+	linearized=a[9]
+	return getLambdas(Nc,Nx,Ny,tx,tx*x,tx*x,filling,T,linearized=linearized,U=U,St=St)
 
 def main2():
+	Nc=256
+	Nx=128
+	Ny=1
+	tx=1
+	filling=.5
+	# U=1.6*tx
+	U=2.5
+	St=None
+	Ts=np.linspace(0.01,.2,10)
+	# G=greensFunction(-1,T,v=[1/(1j*w-eps) for w in wsf])
+	# chi0=-G*(G.reverse())
+
+
+	# if St!=None:
+	# 	chi0max=chi0.v.max()
+	# 	U=St/chi0max.real
+
+	# print('mu='+str(mu))
+	# print('U='+str(U))
+	# return
+
+	from multiprocessing import Pool
+	p=Pool(processes=len(Ts)+1)
+	# lambdas=p.map(gl,[(Nc,Nx,Ny,tx,x,filling,T,U,St) for x in xs])
+	lambdasDisp=p.map(gl,[(Nc,Nx,Ny,tx,0,filling,T,U,None,False) for T in Ts])
+	lambdasLin=p.map(gl,[(Nc,Nx,Ny,tx,0,filling,T,U,None,True) for T in Ts])
+	
+	p.terminate()
+	import matplotlib
+	# matplotlib.use('Agg')
+	from matplotlib import rc
+	rc('text', usetex=True)
+	import pylab as pl
+	for S in [0,1]:
+		for Tsym in [0,1]:
+			pl.plot(Ts,[np.real(l[S][Tsym][0]) for l in lambdasDisp],marker='.',label='$\\mathrm{Full\\ '+('E' if (S-.5)*(.5-Tsym)<0 else 'O')+('T' if S==1 else 'S')+('O' if Tsym==1 else 'E')+'}$')
+			pl.plot(Ts,[np.real(l[S][Tsym][0]) for l in lambdasLin],marker='.',label='$\\mathrm{Linearized\\ '+('E' if (S-.5)*(.5-Tsym)<0 else 'O')+('T' if S==1 else 'S')+('O' if Tsym==1 else 'E')+'}$')
+	pl.legend()
+	pl.xlim([Ts[0],Ts[-1]])
+	pl.ylim([0,1])
+	# pl.xlabel('$t_y/t_x=t_2/t_x$')
+	pl.xlabel('$T/t_x$')
+	pl.ylabel('$\lambda$')
+	if St==None:
+		title='N_c={0},\\ N_x={1},\\ N_y={2},\\ \\nu={4},\\ U={5}t_x'.format(Nc,Nx,Ny,0,filling,U/tx)
+	else:
+		title='N_c={0},\\ N_x={1},\\ N_y={2},\\ \\nu={4},\\ S_t={5}'.format(Nc,Nx,Ny,0,filling,St)
+	pl.title('$'+title+'$')
+	pl.savefig('lambdas_'+title.replace('\\','')+'.pdf', bbox_inches='tight')
+	pl.show()
+
+
+def main3():
 	# Nc=128
 	# Nx=128
 	# Ny=64
 
-	Nc=2048
-	Nx=512
+	Nc=512
+	Nx=128
 	Ny=1
 	tx=1
 	filling=.5
 	# U=1.6*tx
 	U=None
 	St=.97
-	T=0.04*tx
+	T=0.005*tx
+	
+
+	# #test if small T gives small U
+	# ty=0.05
+	# t2=0.05
+	# mu=0
+	# muu=2*tx+2*ty+2*t2
+	# mul=-muu
+	# ok=False
+	# Npgoal=int(filling*Nx*Ny)
+	# kxs=np.array([[-np.pi+(i+1)*2*np.pi/Nx for i in range(Nx)],]*Ny).transpose()
+	# kys=np.array([[-np.pi+(i+1)*2*np.pi/Ny for i in range(Ny)],]*Nx)
+	# wsf=[greensFunction.getw(Nc,-1,T,i) for i in range(2*Nc)]
+	# wsb=[greensFunction.getw(Nc,1,T,i) for i in range(2*Nc-1)]
+	# while not ok:
+	# 	eps=-2*tx*np.cos(kxs)-2*ty*np.cos(kys)-2*t2*np.cos(kxs+kys)-mu
+	# 	Np=(0 >= eps).sum()
+	# 	Nh=(0 < eps).sum()
+	# 	assert Np+Nh==Nx*Ny
+	# 	if Npgoal==Np or abs(muu-mul)<1e-9:
+	# 		ok=True
+	# 	if Np<Npgoal:
+	# 		mul=mu
+	# 		mu=(mu+muu)/2
+	# 	if Np>Npgoal:
+	# 		muu=mu
+	# 		mu=(mu+mul)/2
+	
+
+	# pl.figure(0)
+	# plotBZ(eps)
+	# pl.draw()
+
+	G=greensFunction(-1,T,v=[1/(1j*w-eps) for w in wsf])
+	chi0=-G*(G.reverse())
+
+
+	if St!=None:
+		chi0max=chi0.v.max()
+		U=St/chi0max.real
+
+	print('mu='+str(mu))
+	print('U='+str(U))
+	return
+
 	xs=np.linspace(0,.1,2)
 	from multiprocessing import Pool
 	p=Pool(processes=len(xs)+1)
-	lambdas=p.map(gl,[(Nc,Nx,Ny,tx,x,filling,T,U,St) for x in xs])
+	# lambdas=p.map(gl,[(Nc,Nx,Ny,tx,x,filling,T,U,St) for x in xs])
+	lambdas=p.map(gl,[(Nc,Nx,Ny,tx,0,filling,T,U,St,l) for l in [False,True]])
+	xs=[0,1]
 	p.terminate()
 	import matplotlib
-	matplotlib.use('Agg')
+	# matplotlib.use('Agg')
 	from matplotlib import rc
 	rc('text', usetex=True)
 	import pylab as pl
-
 	for S in [0,1]:
 		for Tsym in [0,1]:
-			pl.plot(xs,[l[S][Tsym][0] for l in lambdas],marker='.',label='$\\mathrm{'+('E' if (S-.5)*(.5-Tsym)<0 else 'O')+('T' if S==1 else 'S')+('O' if Tsym==1 else 'E')+'}$')
+			print([np.real(l[S][Tsym][0]) for l in lambdas])
+			pl.plot(xs,[np.real(l[S][Tsym][0]) for l in lambdas],marker='.',label='$\\mathrm{'+('E' if (S-.5)*(.5-Tsym)<0 else 'O')+('T' if S==1 else 'S')+('O' if Tsym==1 else 'E')+'}$')
 	pl.legend()
 	pl.xlim([xs[0],xs[-1]])
-	pl.xlabel('$t_y/t_x=t_2/t_x$')
+	pl.ylim([0,1])
+	# pl.xlabel('$t_y/t_x=t_2/t_x$')
+	pl.xlabel('[Full dispersion, Linearized]')
 	pl.ylabel('$\lambda$')
 	if St==None:
 		title='N_c={0},\\ N_x={1},\\ N_y={2},\\ T={3}t_x,\\ \\nu={4},\\ U={5}t_x'.format(Nc,Nx,Ny,T/tx,filling,U/tx)
@@ -298,6 +405,7 @@ def main2():
 		title='N_c={0},\\ N_x={1},\\ N_y={2},\\ T={3}t_x,\\ \\nu={4},\\ S_t={5}'.format(Nc,Nx,Ny,T/tx,filling,St)
 	pl.title('$'+title+'$')
 	pl.savefig('lambdas_'+title.replace('\\','')+'.pdf', bbox_inches='tight')
+	pl.show()
 
 
 def main():
