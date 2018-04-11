@@ -70,7 +70,7 @@ class MultiState:
 
 #visa applicaiton STH2180329AL5442801
 
-def coordToi(sys,coords):
+def c2i(sys,coords):
 	n=1
 	i=0
 	for j in range(len(sys)):
@@ -78,7 +78,7 @@ def coordToi(sys,coords):
 		n*=sys[j]
 	return i
 
-def iToCoord(sys,i):
+def i2c(sys,i):
 	n=1
 	coords=[]
 	for j in range(len(sys)):
@@ -94,17 +94,16 @@ def addToMultiState(ms,ps):
 
 	if tuple(ps.state) in ms:
 		ms[tuple(ps.state)]+=ps.amp
+		if ms[tuple(ps.state)]==0:
+			ms.pop(tuple(ps.state))
 	else:
 		ms[tuple(ps.state)]=ps.amp
-
-	if ms[tuple(ps.state)]==0:	
-		ms.pop(tuple(ps.state))
 
 def symmetrize(sys,psi,group,rep):
 	out=[]
 	for p in psi:
 		for i in range(len(group)):
-			p2=ProdState(p.amp*rep[i],[coordToi(sys,group[i](iToCoord(sys,s))) for s in p.state])
+			p2=ProdState(p.amp*rep[i],[c2i(sys,group[i](i2c(sys,s))) for s in p.state])
 			addToMultiState(out,p2)
 	return out
 
@@ -121,9 +120,70 @@ def fac(n):
 def binom(a,b):
 	return fac(a)//fac(a-b)//fac(b)
 
+def Lanczos( A, v, getZero, dot, mul, m):
+    # https://en.wikipedia.org/wiki/Lanczos_algorithm
+    V = [getZero() for i in range(m)]
+    T = np.zeros( (m,m) )
+    vo   = getZero()
+    beta = 0
+    for j in range( m-1 ):
+        w    = A(v)
+        alfa = dot(w,v)
+        w    = w - alfa * v - beta * vo
+        beta = np.sqrt( np.dot( w, w ) ) 
+        vo   = v
+        v    = w / beta 
+        T[j,j  ] = alfa 
+        T[j,j+1] = beta
+        T[j+1,j] = beta
+        V[j,:]   = v
+    w    = np.dot( A,  v )
+    alfa = np.dot( w, v )
+    w    = w - alfa * v - beta * vo
+    T[m-1,m-1] = np.dot( w, v )
+    V[m-1]     = w / np.sqrt( np.dot( w, w ) ) 
+    return T, V
+
+def HubbardH(nx,ny,mu,tx,ty,U,psi):
+	sys=[2,nx,ny]
+	newPsi={}
+	for pstate,pamp in psi.items():
+		p=ProdState(pamp,pstate)
+		p2=ProdState(mu*p.amp,p.state)
+		addToMultiState(newPsi,p2)
+
+		for ix in range(nx):
+			for iy in range(ny):
+				i0u=c2i(sys,[0,ix,iy])
+				i0d=c2i(sys,[1,ix,iy])
+				p2=p.c(i0d).cd(i0d).c(i0u).cd(i0u)
+				p2.amp*=U
+				addToMultiState(newPsi,p2)
+
+				for ialpha in range(2):
+					i0=c2i(sys,[ialpha,ix,iy])
+					ix1=c2i(sys,[ialpha,(ix+1)%nx,iy])
+					iy1=c2i(sys,[ialpha,ix,(iy+1)%ny])
+
+					p2=p.c(i0).cd(ix1)
+					p2.amp*=tx
+					addToMultiState(newPsi,p2)
+					p2=p.c(ix1).cd(i0)
+					p2.amp*=tx
+					addToMultiState(newPsi,p2)
+
+					if ny>1:
+						p2=p.c(i0).cd(iy1)
+						p2.amp*=ty
+						addToMultiState(newPsi,p2)
+						p2=p.c(iy1).cd(i0)
+						p2.amp*=ty
+						addToMultiState(newPsi,p2)
+	return newPsi
+
 def main():
 	nspins=2
-	nx=8
+	nx=6
 	ny=1
 	sys=[nspins,nx,ny]
 	inverseFilling=2
@@ -142,24 +202,25 @@ def main():
 	# l=choice(range(nstates),ne,False)
 	# for i in l:
 	# 	psi=psi.cd(i)
-	
-	for i in range(0,nx,2):
-		psi=psi.cd(coordToi(sys,[0,i,0]))
-		# if i!=0:
-		psi=psi.cd(coordToi(sys,[1,(i+1)%nx,0]))
-	nSubStates=binom(nx*ny,nx*ny//2)**2
-	
-	# for i in range(nx):
-	# 	for j in range(ny//2):
-	# 		jj=2*j+i%2
-	# 		psi=psi.cd(coordToi(sys,[0,i,jj]))
-	# 		psi=psi.cd(coordToi(sys,[1,(i+1)%nx,jj]))
+	if ny==1:	
+		for i in range(0,nx,2):
+			psi=psi.cd(c2i(sys,[0,i,0]))
+			# if i!=0:
+			psi=psi.cd(c2i(sys,[1,(i+1)%nx,0]))
 
+	else:
+		for i in range(nx):
+			for j in range(ny//2):
+				jj=2*j+i%2
+				psi=psi.cd(c2i(sys,[0,i,jj]))
+				psi=psi.cd(c2i(sys,[1,(i+1)%nx,jj]))
+	
+	nSubStates=binom(nx*ny,nx*ny//2)**2
 	# nSubStates=binom(nx*ny,nx*ny//2)**2
 	# nup=4
 	# l=choice(range(nx*ny),nup,False)
 	# for i in l:
-	# 	start=start.cd(coordToi(sys,[0,]))
+	# 	start=start.cd(c2i(sys,[0,]))
 	
 	psi.canonicalize()
 	print(psi)
@@ -179,134 +240,114 @@ def main():
 	print(psi)
 
 	tx=1
-	ty=0
-	U=2
-	shift=-6
-	krylov=[psi]
+	ty=tx
+	U=0
+	shift=-18
+	
+	'''Lanczos(lambda psi:HubbardH(nx,ny,shift,tx,ty,U,psi), psi,
+			lambda : {},
+			inner,
+			lambda f,psi:{k: f*v for k,v in psi.items()},
+			2)'''
+
 	nold=1
-	for it in range(40):
-		newPsi={}
-		for pstate,pamp in psi.items():
-			p=ProdState(pamp,pstate)
-			p2=ProdState(shift*p.amp,p.state)
-			addToMultiState(newPsi,p2)
-			for ix in range(nx):
-				for iy in range(ny):
-					i0u=coordToi(sys,[0,ix,iy])
-					i0d=coordToi(sys,[1,ix,iy])
-					p2=p.c(i0d).cd(i0d).c(i0u).cd(i0u)
-					p2.amp*=U
-					addToMultiState(newPsi,p2)
+	steps=10
+	ssteps=6
+	totSteps=0
+	for sstep in range(ssteps):
+		steps*=2
+		totSteps+=steps
+		for it in range(steps):
+			newPsi=HubbardH(nx,ny,shift,tx,ty,U,psi)
 
-					for ialpha in range(nspins):
-						i0=coordToi(sys,[ialpha,ix,iy])
-						ix1=coordToi(sys,[ialpha,(ix+1)%nx,iy])
-						iy1=coordToi(sys,[ialpha,ix,(iy+1)%ny])
+			print("states: "+str(len(newPsi))+"/"+str(nSubStates))
+			n=inner(newPsi,newPsi)
+			
+			lam=inner(psi,newPsi)
+			assert(lam<0)
+			print("eig: "+str(lam-shift))
 
-						p2=p.c(i0).cd(ix1)
-						p2.amp*=tx
-						addToMultiState(newPsi,p2)
-						p2=p.c(ix1).cd(i0)
-						p2.amp*=tx
-						addToMultiState(newPsi,p2)
+			nn=np.sqrt(n)
+			for key in newPsi:
+			 newPsi[key]/=nn
 
-						p2=p.c(i0).cd(iy1)
-						p2.amp*=ty
-						addToMultiState(newPsi,p2)
-						p2=p.c(iy1).cd(i0)
-						p2.amp*=ty
-						addToMultiState(newPsi,p2)
-		print("before: "+str(len(newPsi))+"/"+str(nSubStates))
+			psi=newPsi
 
-		# for k in krylov:
-		# 	overlap=inner(k,newPsi)
-		# 	for ik in k:
-		# 		p2=ProdState(-ik.amp*overlap,ik.state)
-		# 		addToMultiState(newPsi,p2)
-		# print("after: "+str(len(newPsi))+"/"+str(nSubStates))
-		n=inner(newPsi,newPsi)
-		if it>38:
-			for deltaX in range(nx):
-				x1=0
-				x1p=1
-				y1=0
-				x2=(x1+deltaX)%nx
-				x2p=(x1+deltaX+1)%nx
-				y2=0
-				i1u=coordToi(sys,[0,x1,y1])
-				i1d=coordToi(sys,[1,x1,y1])
-				i2u=coordToi(sys,[0,x2,y2])
-				i2d=coordToi(sys,[1,x2,y2])
+		pairpairList=[]
+		ppairppairList=[]
+		densdensList=[]
+		uddensdensList=[]
+		for deltaX in range(nx):
+			x1=0
+			x1p=1
+			y1=0
+			x2=(x1+deltaX)%nx
+			x2p=(x1+deltaX+1)%nx
+			y2=0
+			i1u=c2i(sys,[0,x1,y1])
+			i1d=c2i(sys,[1,x1,y1])
+			i2u=c2i(sys,[0,x2,y2])
+			i2d=c2i(sys,[1,x2,y2])
 
-				i1pu=coordToi(sys,[0,x1p,y1])
-				i1pd=coordToi(sys,[1,x1p,y1])
-				i2pu=coordToi(sys,[0,x2p,y2])
-				i2pd=coordToi(sys,[1,x2p,y2])
-				pairpair=0
-				ppairppair=0
-				densdens=0
-				uddensdens=0
-				for pstate,pamp in newPsi.items():
-					p2=ProdState(pamp,pstate)
-					s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
-					s2.canonicalize()
-					pairpair+=inner(newPsi,  {tuple(s2.state):s2.amp})
+			i1pu=c2i(sys,[0,x1p,y1])
+			i1pd=c2i(sys,[1,x1p,y1])
+			i2pu=c2i(sys,[0,x2p,y2])
+			i2pd=c2i(sys,[1,x2p,y2])
+			pairpair=0
+			ppairppair=0
+			densdens=0
+			uddensdens=0
+			for pstate,pamp in psi.items():
+				p2=ProdState(pamp,pstate)
+				s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
+				s2.canonicalize()
+				pairpair+=inner(psi,  {tuple(s2.state):s2.amp})
 
-					s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
-					s2.canonicalize()
-					ppairppair+=inner(newPsi,  {tuple(s2.state):s2.amp})
+				s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
+				s2.canonicalize()
+				ppairppair+=inner(psi,  {tuple(s2.state):s2.amp})
 
-					s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
-					s2.canonicalize()
-					densdens+=inner(newPsi,  {tuple(s2.state):s2.amp})
+				s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
+				s2.canonicalize()
+				densdens+=inner(psi,  {tuple(s2.state):s2.amp})
 
-					s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
-					s2.canonicalize()
-					uddensdens+=inner(newPsi,  {tuple(s2.state):s2.amp})
-						# print(pairpair)
-				upnavg=1/2
-				downnavg=1/2
-				print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair/n))
-				print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair/n))
-				print("Dx="+str(deltaX)+",     dens dens: "+str(densdens/n-upnavg*upnavg))
-				print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens/n-upnavg*downnavg))
-				print()
+				s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
+				s2.canonicalize()
+				uddensdens+=inner(psi,  {tuple(s2.state):s2.amp})
 
-		lam=inner(psi,newPsi)
-		assert(lam<0)
-		print("eig: "+str(lam-shift))
+			upnavg=1/2
+			downnavg=1/2
+			pairpairList.append(pairpair)
+			ppairppairList.append(ppairppair)
+			densdensList.append(densdens-upnavg*upnavg)
+			uddensdensList.append(uddensdens-upnavg*downnavg)
 
-		nn=np.sqrt(n)
-		for key in newPsi:
-		 newPsi[key]/=nn
-
-		# krylov.append(newPsi)
-
-		# print(str(len(newPsi))+"/"+str(2**nstates))
+			print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair))
+			print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair))
+			print("Dx="+str(deltaX)+",     dens dens: "+str(densdens-upnavg*upnavg))
+			print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens-upnavg*downnavg))
+			print()
+		import pylab as pl
+		pl.figure(sstep)
+		corrList=[pairpairList,ppairppairList,densdensList,uddensdensList]
+		corrList=[c+[c[0]] for c in corrList]
+		assert(tx==1)
+		pl.title("$U="+str(U)+"t_x$")
+		for i in range(len(corrList)):
+			pl.plot(corrList[i],label=[
+				'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(0)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x)\\rangle$',
+									'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(1)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x+1)\\rangle$',
+									'$\\langle n_{\\uparrow}(0)n_{\\uparrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\uparrow}\\rangle$',
+									'$\\langle n_{\\uparrow}(0)n_{\\downarrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\downarrow}\\rangle$'][i])
+		pl.xlabel("$x$")
+		pl.legend()
+		pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'_steps='+str(totSteps)+'.pdf', bbox_inches='tight',figsize=(2,1))
 		
-		# print(newPsi)
-		# n=inner(newPsi,newPsi)
-		
-		# print(n)
-		psi=newPsi
+	# pl.figure(1)
+	# pl.hist(psi.values(),bins=300)
 
-	# for k1 in krylov:
-	# 	for k2 in krylov:
-	# 			print(inner(k1,k2))
+	pl.show()
 
-	#1, create state with finite electron number that obeys all symmetries. This is possibly nontrivial
-	#1b, apply symmetry operators and verify it is an eigenstate and obtain eigenvalues
-	#2, apply hamiltonian repeatedly to generate all eigenvectors and eigenvalues in the subspace of eigenstates with correct symmetries
-	#3 check that symmetries are still preserved? Where might leakage come from?
-	#go to different electron number/spin/momentum/... check orthogonality
-	#this way we get e.g. different groundstate energy as a function of electron number
-
-	# we want a basis that are eigenstates of as many symmetries as possible. That way when we apply H we don't expand..
-	# consider product of momentum eigenstates
-
-	# psi(1) is picked
-	# psi(k+1)=H psi(k)
 
 if __name__ == "__main__":
 	main()
-
