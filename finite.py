@@ -1,9 +1,8 @@
 import numpy as np
-import pylab as pl
 from scipy import sparse
 from scipy.sparse import linalg
 import pickle
-import itertools
+import os.path
 
 #we represent a product state by a set of numbers corresponding to applications of cdaggger on the vacuum.
 #Each number is an index representing spin, x, y, ...
@@ -194,251 +193,162 @@ def getOrderedSubsets(n,N,shift=0):
 
 def main():
 	nspins=2
-	nx=12
+	nx=14
 	ny=1
 	sys=[nspins,nx,ny]
-	inverseFilling=2
-
-	#We have several indep symmetries, electron number, total spin, momentum, two mirrors
-	nstates=nspins*nx*ny
-
-	ne=nstates//inverseFilling
-
-	vac=ProdState(1,())
-	psi=ProdState(vac.amp,vac.state)
-	# for i in range(ne):
-	# 	start=start.cd(i)
-
-	# from numpy.random import choice
-	# l=choice(range(nstates),ne,False)
-	# for i in l:
-	# 	psi=psi.cd(i)
-	if ny==1:	
-		for i in range(0,nx,2):
-			psi=psi.cd(c2i(sys,[0,i,0]))
-			# if i!=0:
-			psi=psi.cd(c2i(sys,[1,(i+1)%nx,0]))
-
-	else:
-		for i in range(nx):
-			for j in range(ny//2):
-				jj=2*j+i%2
-				psi=psi.cd(c2i(sys,[0,i,jj]))
-				psi=psi.cd(c2i(sys,[1,(i+1)%nx,jj]))
-	
-	nSubStates=binom(nx*ny,nx*ny//2)**2
-	# nSubStates=binom(nx*ny,nx*ny//2)**2
-	# nup=4
-	# l=choice(range(nx*ny),nup,False)
-	# for i in l:
-	# 	start=start.cd(c2i(sys,[0,]))
-	
-
-	print(psi)
-
-
-	# apply symmetry transfs
-	# spin flip
-	psi={psi.state:psi.amp}
-	print(psi)
-	
-	identity=lambda x:x
-	#psi=symmetrize(sys,psi,[identity,lambda x:[1-x[0],x[1],x[2]]],[1,1])
-	# psi=symmetrize(sys,psi,[lambda x,i=i:[x[0],(x[1]+i)%nx,x[2]] for i in range(nx)],[1 for i in range(nx)])
-	# psi=symmetrize(sys,psi,[lambda x,i=i:[x[0],x[1],(x[2]+i)%ny] for i in range(ny)],[1 for i in range(ny)])
-	# psi=symmetrize(sys,psi,[identity,lambda x:[x[0],x[2],x[1]] ],[1 ,1])
-	# psi=symmetrize(sys,psi,[identity,lambda x:[x[0],nx-x[1]-1,x[2]] ],[1 ,1])
-	print(psi)
-
 	tx=1
-	ty=tx
-	U=8
+	ty=tx*.1
 
-	useCache=False
+	U=4
+	nups=nx*ny//2
+	ndowns=nx*ny//2
+
 	filename="cache/ED_U="+str(U)+"_nx="+str(nx)+"_ny="+str(ny)
-	if useCache:
-		with open(filename, 'rb') as f:
-				psi = pickle.load(f)
-	else:
-		
-		# basisSize=-1
-		# basis=[]
-		# while True:
-		# 	psi=HubbardH(nx,ny,0,tx,ty,U,psi)
-		# 	newBasisSize=len(psi)
-		# 	print("basis size: "+str(newBasisSize))
-		# 	if newBasisSize==basisSize:
-		# 		print("Creating sparse matrix")
-		# 		basis=[*psi]
-		# 		index={basis[i]:i for i in range(len(basis))}
-		# 		Hmat = sparse.lil_matrix((basisSize, basisSize))
-		# 		print("Constructing sparse matrix")
-		# 		progress=-1
-		# 		for i in range(len(basis)):
-		# 			newProgress=10*i//len(basis)
-		# 			if newProgress!=progress:
-		# 				print(str(10*newProgress)+"%")
-		# 				progress=newProgress
-		# 			res=HubbardH(nx,ny,0,tx,ty,U,{basis[i]:1})
-		# 			for k,v in res.items():
-		# 				j=index[k]
-		# 				Hmat[i,j]=v
-		# 		break
-		# 		print("Spare matrix constructed")
-		# 		print("Finding groundstate")
-		# 	else:
-		# 		basisSize=newBasisSize
-		print("Constructing basis...")
-		ups=list(itertools.combinations([c2i(sys,[0,x,0]) for x in range(nx)], nx//2))
-		downs=itertools.combinations([c2i(sys,[1,x,0]) for x in range(nx)], nx//2)
-		import heapq
-		basis=[tuple(heapq.merge(u,d)) for d in downs for u in ups]
-		
-		print("Basis size: "+str(len(basis)))
-		
-		print("Creating sparse matrix...")
-		index={basis[i]:i for i in range(len(basis))}
-		Hmat = sparse.lil_matrix((len(basis), len(basis)))
-		print("Constructing sparse matrix...")
-		progress=-1
-		for i in range(len(basis)):
-			p=i*100//len(basis)
-			if p!=progress:
-				print(str(p)+"%")
-				progress=p
-			res=HubbardH(nx,ny,0,tx,ty,U,{basis[i]:1})
-			for k,v in res.items():
-				if not k in index:
-					print("not found:"+str(k))
-					index[k]=len(index)
-				j=index[k]
-				Hmat[i,j]=v
-	
-		print("Matrix constructed")
-		print("Finding groundstate...")
-
-
-		
-		vals, vecs = linalg.eigsh(Hmat, k=1,which='SA')
-		print(vals)
-		psi={basis[i]:vecs[i,0] for i in range(len(basis))}
-		oldSteps=0
-		newSteps=20
-		print(np.vdot(vecs[:,0],vecs[:,0]))
-		print(vecs[:,0])
-		print("Saving result...")
-		with open(filename, 'wb') as f:
-			pickle.dump(psi, f)
+	if nups!=nx*ny//2:
+		filename+="_nups="+str(nups)
+	if ndowns!=nx*ny//2:
+		filename+="_nups="+str(ndowns)
+	if ty!=tx:
+		filename+="_tyotx="+str(ty/tx)
 	
 	# pl.figure(1)
 	# pl.hist(psi.values(),bins=1000,range=[-.00001,.00001])
 	# pl.show()
 
-	if False:
-		filename="cache/U="+str(U)+"_nx="+str(nx)+"_ny="+str(ny)+"_steps="+str(newSteps)
-		shift=-18
-		if oldSteps==newSteps:
+	if os.path.isfile(filename+"_corr"):
+		with open(filename+"_corr", 'rb') as f:
+			corrList = pickle.load(f)
+	else:
+		if os.path.isfile(filename):
 			with open(filename, 'rb') as f:
 				psi = pickle.load(f)
 		else:
-			for it in range(oldSteps,newSteps):
-				newPsi=HubbardH(nx,ny,shift,tx,ty,U,psi)
-
-				print("states: "+str(len(newPsi))+"/"+str(nSubStates))
-				n=inner(newPsi,newPsi)
-				
-				lam=inner(psi,newPsi)
-				assert(lam<0)
-				print("eig: "+str(lam-shift))
-
-				nn=np.sqrt(n)
-				for key in newPsi:
-					newPsi[key]/=nn
-				oldPsi=psi
-				psi=newPsi
-
+			print("Constructing basis...")
+			import itertools
+			ups=list(itertools.combinations([c2i(sys,[0,x,y]) for y in range(ny) for x in range(nx) ], nups))
+			downs=list(itertools.combinations([c2i(sys,[1,x,y]) for y in range(ny) for x in range(nx)], ndowns))
+			print("Up basis size: "+str(len(ups)))
+			print("Down basis size: "+str(len(downs)))
+			import heapq
+			basis=[tuple(heapq.merge(u,d)) for d in downs for u in ups]
+			print("Total basis size: "+str(len(basis)))
+			print("Indexing basis...")
+			index={basis[i]:i for i in range(len(basis))}
+			print("Creating sparse matrix...")
+			Hmat = sparse.lil_matrix((len(basis), len(basis)))
+			print("Constructing sparse matrix...")
+			progress=-1
+			for i in range(len(basis)):
+				p=i*100//len(basis)
+				if p!=progress:
+					print(str(p)+"%")
+					progress=p
+				res=HubbardH(nx,ny,0,tx,ty,U,{basis[i]:1})
+				for k,v in res.items():
+					Hmat[i,index[k]]=v
+		
+			print("Matrix constructed")
+			print("Finding groundstate...")
+			vals, vecs = linalg.eigsh(Hmat, k=1,which='SA')
+			print(vals)
+			psi={basis[i]:vecs[i,0] for i in range(len(basis))}
+			print("Saving result...")
 			with open(filename, 'wb') as f:
 				pickle.dump(psi, f)
+		print("Calculating correlation functions...")
+		pairpairList=[]
+		ppairppairList=[]
+		ofpairofpairList=[]
+		densdensList=[]
+		uddensdensList=[]
+		for deltaX in range(nx):
+			x1=0
+			x1p=1
+			y1=0
+			x2=(x1+deltaX)%nx
+			x2p=(x1+deltaX+1)%nx
+			y2=0
+			i1u=c2i(sys,[0,x1,y1])
+			i1d=c2i(sys,[1,x1,y1])
+			i2u=c2i(sys,[0,x2,y2])
+			i2d=c2i(sys,[1,x2,y2])
 
-	pairpairList=[]
-	ppairppairList=[]
-	ofpairofpairList=[]
-	densdensList=[]
-	uddensdensList=[]
-	for deltaX in range(nx):
-		x1=0
-		x1p=1
-		y1=0
-		x2=(x1+deltaX)%nx
-		x2p=(x1+deltaX+1)%nx
-		y2=0
-		i1u=c2i(sys,[0,x1,y1])
-		i1d=c2i(sys,[1,x1,y1])
-		i2u=c2i(sys,[0,x2,y2])
-		i2d=c2i(sys,[1,x2,y2])
+			i1pu=c2i(sys,[0,x1p,y1])
+			i1pd=c2i(sys,[1,x1p,y1])
+			i2pu=c2i(sys,[0,x2p,y2])
+			i2pd=c2i(sys,[1,x2p,y2])
+			pairpair=0
+			ppairppair=0
+			ofpairofpair=0
+			densdens=0
+			uddensdens=0
+			for pstate,pamp in psi.items():
+				p2=ProdState(pamp,pstate)
 
-		i1pu=c2i(sys,[0,x1p,y1])
-		i1pd=c2i(sys,[1,x1p,y1])
-		i2pu=c2i(sys,[0,x2p,y2])
-		i2pd=c2i(sys,[1,x2p,y2])
-		pairpair=0
-		ppairppair=0
-		ofpairofpair=0
-		densdens=0
-		uddensdens=0
-		for pstate,pamp in psi.items():
-			p2=ProdState(pamp,pstate)
+				s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
+				pairpair+=inner(psi,  {s2.state:s2.amp})
 
-			s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
-			pairpair+=inner(psi,  {s2.state:s2.amp})
+				s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
+				ppairppair+=inner(psi,  {s2.state:s2.amp})
 
-			s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
-			ppairppair+=inner(psi,  {s2.state:s2.amp})
+				s2=( p2.c(i2u).cd(i2u).c(i2pu).c(i2d) ).cd(i1d).cd(i1pu).c(i1u).cd(i1u)
+				ofpairofpair+=inner(psi,  {s2.state:s2.amp})
 
-			s2=( p2.c(i2u).cd(i2u).c(i2pu).c(i2d) ).cd(i1d).cd(i1pu).c(i1u).cd(i1u)
-			ofpairofpair+=inner(psi,  {s2.state:s2.amp})
+				s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
+				densdens+=inner(psi,  {s2.state:s2.amp})
 
-			s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
-			densdens+=inner(psi,  {s2.state:s2.amp})
+				s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
+				uddensdens+=inner(psi,  {s2.state:s2.amp})
 
-			s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
-			uddensdens+=inner(psi,  {s2.state:s2.amp})
+			upnavg=nups/(nx*ny)
+			downnavg=ndowns/(nx*ny)
+			pairpairList.append(pairpair)
+			ppairppairList.append(ppairppair)
+			ofpairofpairList.append(ofpairofpair)
+			densdensList.append(densdens-upnavg*upnavg)
+			uddensdensList.append(uddensdens-upnavg*downnavg)
 
-		upnavg=1/2
-		downnavg=1/2
-		pairpairList.append(pairpair)
-		ppairppairList.append(ppairppair)
-		ofpairofpairList.append(ofpairofpair)
-		densdensList.append(densdens-upnavg*upnavg)
-		uddensdensList.append(uddensdens-upnavg*downnavg)
+			print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair))
+			print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair))
+			print("Dx="+str(deltaX)+", t-pair t-pair: "+str(ofpairofpair))
+			print("Dx="+str(deltaX)+",     dens dens: "+str(densdens-upnavg*upnavg))
+			print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens-upnavg*downnavg))
+			print()
 
-		print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair))
-		print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair))
-		print("Dx="+str(deltaX)+", t-pair t-pair: "+str(ofpairofpair))
-		print("Dx="+str(deltaX)+",     dens dens: "+str(densdens-upnavg*upnavg))
-		print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens-upnavg*downnavg))
-		print()
+		corrList=[pairpairList,ppairppairList,ofpairofpairList,densdensList,uddensdensList]
+		corrList=[c+[c[0]] for c in corrList]
+
+		with open(filename+"_corr", 'wb') as f:
+			pickle.dump(corrList, f)
 	
-	pl.figure(0)
-	corrList=[pairpairList,ppairppairList,ofpairofpairList,densdensList,uddensdensList]
-	corrList=[[ci/c[nx//2] for ci in c] for c in corrList]
-	corrList=[c+[c[0]] for c in corrList]
 	assert(tx==1)
+	corrNames=[	'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(0)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x)\\rangle$',
+				'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(1)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x+1)\\rangle$',
+				'$\\langle n_{\\uparrow}(0)c^\dagger_{\\uparrow}(1)c^\dagger_{\\downarrow}(0)  c_{\\downarrow}(x)c_{\\uparrow}(x+1)n_{\\uparrow}(x)\\rangle$',
+				'$\\langle n_{\\uparrow}(0)n_{\\uparrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\uparrow}\\rangle$',
+				'$\\langle n_{\\uparrow}(0)n_{\\downarrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\downarrow}\\rangle$']
+	import pylab as pl
+	pl.figure(0)
 	pl.title("$U="+str(U)+"t_x$")
 	for i in range(len(corrList)):
-		pl.plot(corrList[i],label=[
-			'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(0)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x)\\rangle$',
-								'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(1)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x+1)\\rangle$',
-								'$\\langle OSO\\rangle$',
-								'$\\langle n_{\\uparrow}(0)n_{\\uparrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\uparrow}\\rangle$',
-								'$\\langle n_{\\uparrow}(0)n_{\\downarrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\downarrow}\\rangle$'][i])
+		pl.plot(corrList[i],label=corrNames[i],marker='.')
+	# xs=np.linspace(0,nx,200)
+	# pl.loglog(xs,xs*2+0*(nx-xs)**-5,ls='--')
+
 	pl.xlabel("$x$")
 	pl.legend()
 	pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'.pdf', bbox_inches='tight',figsize=(2,1))
-	
-	# pl.figure(1)
-	# pl.hist(psi.values(),bins=300)
 
+	pl.figure(1)
+	pl.title("$U="+str(U)+"t_x$")
+	for i in range(len(corrList)):
+		pl.loglog(range(1,nx//2+1),np.abs(corrList[i][1:nx//2+1]),label=corrNames[i],marker='.')
+	# xs=np.linspace(0,nx,200)
+	# pl.loglog(xs,xs*2+0*(nx-xs)**-5,ls='--')
+
+	pl.xlabel("$x$")
+	pl.legend()
+	pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'.pdf', bbox_inches='tight',figsize=(2,1))
 	pl.show()
 
 
