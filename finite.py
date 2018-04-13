@@ -1,10 +1,22 @@
 import numpy as np
+import pylab as pl
+from scipy import sparse
+from scipy.sparse import linalg
+import pickle
+import itertools
 
-#we represent a product state by a set of numbers corresponding to applications of cdaggger on the vacuum. Each number is an index representing spin, x, y, ... The canonical representation has these in increasing order
+#we represent a product state by a set of numbers corresponding to applications of cdaggger on the vacuum.
+#Each number is an index representing spin, x, y, ...
+#The canonical representation has these in increasing order
+#The first index is the last operator to be applied, ie they appear in same order as when acting on ket
+
+# a general state is represented by a dictionary of canonical single state tuples:amplitudes
+
+# an operator is represented by a function that takes a canonical tuple and an amplitude and gives a new canonical tuple and an amplitude
 
 class ProdState:
 	def __init__(self,amp,state):
-		self.state=[s for s in state]
+		self.state=state
 		self.amp=amp
 
 	def c(self,i):
@@ -14,34 +26,26 @@ class ProdState:
 				pos=j
 				break
 		if pos==-1:
-			return ProdState(0,[])
+			return ProdState(0,())
 		else:
 			return ProdState(self.amp*(1 if pos%2==0 else -1),self.state[:pos]+self.state[pos+1:])
 
 	def cd(self,i):
-		return ProdState(self.amp,self.state+[i])
-
-	def canonicalize(self):
-		l=self.state
 		parity=1
-		for i in range(1,len(l)):
-			currentvalue = l[i]
-			position = i
-
-			while position>0 and l[position-1]>currentvalue:
-				l[position]=l[position-1]
-				position = position-1
-			
-			l[position]=currentvalue
-			if (position-i)%2==1:
-				parity=-parity
-		for i in range(1,len(l)):
-			if l[i-1]==l[i]:
+		ip=len(self.state)
+		for pos in range(len(self.state)):
+			p=self.state[pos]
+			if p==i:
 				self.amp=0
-				self.state=[]
-				return
-		self.state=l
-		self.amp*=parity
+				return ProdState(0,())
+			if p>i:
+				ip=pos
+				break
+		return ProdState(self.amp if ip%2==0 else -self.amp,self.state[:ip]+(i,)+self.state[ip:])
+	
+	def op(O):
+		O()
+		ProdState(self.amp if ip%2==0 else -self.amp,self.state[:ip]+(i,)+self.state[ip:])
 
 	def toEquivClass(self,group,repr):
 		for i in range(len(group)):
@@ -64,11 +68,6 @@ class ProdState:
 	def __repr__(self):
 		return str(self)
 
-class MultiState:
-	def __add__(self,other):
-		return 1
-
-#visa applicaiton STH2180329AL5442801
 
 def c2i(sys,coords):
 	n=1
@@ -89,15 +88,18 @@ def i2c(sys,i):
 def addToMultiState(ms,ps):
 	if ps.amp==0:
 		return
+	# ps.canonicalize()
 
-	ps.canonicalize()
-
-	if tuple(ps.state) in ms:
-		ms[tuple(ps.state)]+=ps.amp
-		if ms[tuple(ps.state)]==0:
-			ms.pop(tuple(ps.state))
+	if ps.state in ms:
+		ms[ps.state]+=ps.amp
+		# if ms[ps.state]==0:
+		# 	ms.pop(ps.state) //TODO uncomment, why does this even get called??
 	else:
-		ms[tuple(ps.state)]=ps.amp
+		ms[ps.state]=ps.amp
+
+def expectation(psi,op):
+	#o takes multiparticle state, gives multiparticle state
+	return inner(psi,op(psi))
 
 def symmetrize(sys,psi,group,rep):
 	out=[]
@@ -108,9 +110,10 @@ def symmetrize(sys,psi,group,rep):
 	return out
 
 def inner(a,b):
+	#a,b multistates
 	acc=0
 	for state,amp in b.items():
-		if tuple(state) in a:
+		if state in a:
 			acc+=np.conj(a[state])*amp
 	return acc
 
@@ -181,9 +184,17 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 						addToMultiState(newPsi,p2)
 	return newPsi
 
+def getOrderedSubsets(n,N,shift=0):
+	if n==0:
+		return [()]
+	if N==1:
+		return [(shift,)]
+	else:
+		return [(i+shift,)+r for i in range(N-n) for r in getOrderedSubsets(n-1,N-1-i,shift=shift+1+i)]
+
 def main():
 	nspins=2
-	nx=6
+	nx=12
 	ny=1
 	sys=[nspins,nx,ny]
 	inverseFilling=2
@@ -193,7 +204,7 @@ def main():
 
 	ne=nstates//inverseFilling
 
-	vac=ProdState(1,[])
+	vac=ProdState(1,())
 	psi=ProdState(vac.amp,vac.state)
 	# for i in range(ne):
 	# 	start=start.cd(i)
@@ -222,13 +233,13 @@ def main():
 	# for i in l:
 	# 	start=start.cd(c2i(sys,[0,]))
 	
-	psi.canonicalize()
+
 	print(psi)
 
 
 	# apply symmetry transfs
 	# spin flip
-	psi={tuple(psi.state):psi.amp}
+	psi={psi.state:psi.amp}
 	print(psi)
 	
 	identity=lambda x:x
@@ -241,108 +252,190 @@ def main():
 
 	tx=1
 	ty=tx
-	U=0
-	shift=-18
-	
-	'''Lanczos(lambda psi:HubbardH(nx,ny,shift,tx,ty,U,psi), psi,
-			lambda : {},
-			inner,
-			lambda f,psi:{k: f*v for k,v in psi.items()},
-			2)'''
+	U=8
 
-	nold=1
-	steps=10
-	ssteps=6
-	totSteps=0
-	for sstep in range(ssteps):
-		steps*=2
-		totSteps+=steps
-		for it in range(steps):
-			newPsi=HubbardH(nx,ny,shift,tx,ty,U,psi)
-
-			print("states: "+str(len(newPsi))+"/"+str(nSubStates))
-			n=inner(newPsi,newPsi)
-			
-			lam=inner(psi,newPsi)
-			assert(lam<0)
-			print("eig: "+str(lam-shift))
-
-			nn=np.sqrt(n)
-			for key in newPsi:
-			 newPsi[key]/=nn
-
-			psi=newPsi
-
-		pairpairList=[]
-		ppairppairList=[]
-		densdensList=[]
-		uddensdensList=[]
-		for deltaX in range(nx):
-			x1=0
-			x1p=1
-			y1=0
-			x2=(x1+deltaX)%nx
-			x2p=(x1+deltaX+1)%nx
-			y2=0
-			i1u=c2i(sys,[0,x1,y1])
-			i1d=c2i(sys,[1,x1,y1])
-			i2u=c2i(sys,[0,x2,y2])
-			i2d=c2i(sys,[1,x2,y2])
-
-			i1pu=c2i(sys,[0,x1p,y1])
-			i1pd=c2i(sys,[1,x1p,y1])
-			i2pu=c2i(sys,[0,x2p,y2])
-			i2pd=c2i(sys,[1,x2p,y2])
-			pairpair=0
-			ppairppair=0
-			densdens=0
-			uddensdens=0
-			for pstate,pamp in psi.items():
-				p2=ProdState(pamp,pstate)
-				s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
-				s2.canonicalize()
-				pairpair+=inner(psi,  {tuple(s2.state):s2.amp})
-
-				s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
-				s2.canonicalize()
-				ppairppair+=inner(psi,  {tuple(s2.state):s2.amp})
-
-				s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
-				s2.canonicalize()
-				densdens+=inner(psi,  {tuple(s2.state):s2.amp})
-
-				s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
-				s2.canonicalize()
-				uddensdens+=inner(psi,  {tuple(s2.state):s2.amp})
-
-			upnavg=1/2
-			downnavg=1/2
-			pairpairList.append(pairpair)
-			ppairppairList.append(ppairppair)
-			densdensList.append(densdens-upnavg*upnavg)
-			uddensdensList.append(uddensdens-upnavg*downnavg)
-
-			print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair))
-			print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair))
-			print("Dx="+str(deltaX)+",     dens dens: "+str(densdens-upnavg*upnavg))
-			print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens-upnavg*downnavg))
-			print()
-		import pylab as pl
-		pl.figure(sstep)
-		corrList=[pairpairList,ppairppairList,densdensList,uddensdensList]
-		corrList=[c+[c[0]] for c in corrList]
-		assert(tx==1)
-		pl.title("$U="+str(U)+"t_x$")
-		for i in range(len(corrList)):
-			pl.plot(corrList[i],label=[
-				'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(0)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x)\\rangle$',
-									'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(1)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x+1)\\rangle$',
-									'$\\langle n_{\\uparrow}(0)n_{\\uparrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\uparrow}\\rangle$',
-									'$\\langle n_{\\uparrow}(0)n_{\\downarrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\downarrow}\\rangle$'][i])
-		pl.xlabel("$x$")
-		pl.legend()
-		pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'_steps='+str(totSteps)+'.pdf', bbox_inches='tight',figsize=(2,1))
+	useCache=False
+	filename="cache/ED_U="+str(U)+"_nx="+str(nx)+"_ny="+str(ny)
+	if useCache:
+		with open(filename, 'rb') as f:
+				psi = pickle.load(f)
+	else:
 		
+		# basisSize=-1
+		# basis=[]
+		# while True:
+		# 	psi=HubbardH(nx,ny,0,tx,ty,U,psi)
+		# 	newBasisSize=len(psi)
+		# 	print("basis size: "+str(newBasisSize))
+		# 	if newBasisSize==basisSize:
+		# 		print("Creating sparse matrix")
+		# 		basis=[*psi]
+		# 		index={basis[i]:i for i in range(len(basis))}
+		# 		Hmat = sparse.lil_matrix((basisSize, basisSize))
+		# 		print("Constructing sparse matrix")
+		# 		progress=-1
+		# 		for i in range(len(basis)):
+		# 			newProgress=10*i//len(basis)
+		# 			if newProgress!=progress:
+		# 				print(str(10*newProgress)+"%")
+		# 				progress=newProgress
+		# 			res=HubbardH(nx,ny,0,tx,ty,U,{basis[i]:1})
+		# 			for k,v in res.items():
+		# 				j=index[k]
+		# 				Hmat[i,j]=v
+		# 		break
+		# 		print("Spare matrix constructed")
+		# 		print("Finding groundstate")
+		# 	else:
+		# 		basisSize=newBasisSize
+		print("Constructing basis...")
+		ups=list(itertools.combinations([c2i(sys,[0,x,0]) for x in range(nx)], nx//2))
+		downs=itertools.combinations([c2i(sys,[1,x,0]) for x in range(nx)], nx//2)
+		import heapq
+		basis=[tuple(heapq.merge(u,d)) for d in downs for u in ups]
+		
+		print("Basis size: "+str(len(basis)))
+		
+		print("Creating sparse matrix...")
+		index={basis[i]:i for i in range(len(basis))}
+		Hmat = sparse.lil_matrix((len(basis), len(basis)))
+		print("Constructing sparse matrix...")
+		progress=-1
+		for i in range(len(basis)):
+			p=i*100//len(basis)
+			if p!=progress:
+				print(str(p)+"%")
+				progress=p
+			res=HubbardH(nx,ny,0,tx,ty,U,{basis[i]:1})
+			for k,v in res.items():
+				if not k in index:
+					print("not found:"+str(k))
+					index[k]=len(index)
+				j=index[k]
+				Hmat[i,j]=v
+	
+		print("Matrix constructed")
+		print("Finding groundstate...")
+
+
+		
+		vals, vecs = linalg.eigsh(Hmat, k=1,which='SA')
+		print(vals)
+		psi={basis[i]:vecs[i,0] for i in range(len(basis))}
+		oldSteps=0
+		newSteps=20
+		print(np.vdot(vecs[:,0],vecs[:,0]))
+		print(vecs[:,0])
+		print("Saving result...")
+		with open(filename, 'wb') as f:
+			pickle.dump(psi, f)
+	
+	# pl.figure(1)
+	# pl.hist(psi.values(),bins=1000,range=[-.00001,.00001])
+	# pl.show()
+
+	if False:
+		filename="cache/U="+str(U)+"_nx="+str(nx)+"_ny="+str(ny)+"_steps="+str(newSteps)
+		shift=-18
+		if oldSteps==newSteps:
+			with open(filename, 'rb') as f:
+				psi = pickle.load(f)
+		else:
+			for it in range(oldSteps,newSteps):
+				newPsi=HubbardH(nx,ny,shift,tx,ty,U,psi)
+
+				print("states: "+str(len(newPsi))+"/"+str(nSubStates))
+				n=inner(newPsi,newPsi)
+				
+				lam=inner(psi,newPsi)
+				assert(lam<0)
+				print("eig: "+str(lam-shift))
+
+				nn=np.sqrt(n)
+				for key in newPsi:
+					newPsi[key]/=nn
+				oldPsi=psi
+				psi=newPsi
+
+			with open(filename, 'wb') as f:
+				pickle.dump(psi, f)
+
+	pairpairList=[]
+	ppairppairList=[]
+	ofpairofpairList=[]
+	densdensList=[]
+	uddensdensList=[]
+	for deltaX in range(nx):
+		x1=0
+		x1p=1
+		y1=0
+		x2=(x1+deltaX)%nx
+		x2p=(x1+deltaX+1)%nx
+		y2=0
+		i1u=c2i(sys,[0,x1,y1])
+		i1d=c2i(sys,[1,x1,y1])
+		i2u=c2i(sys,[0,x2,y2])
+		i2d=c2i(sys,[1,x2,y2])
+
+		i1pu=c2i(sys,[0,x1p,y1])
+		i1pd=c2i(sys,[1,x1p,y1])
+		i2pu=c2i(sys,[0,x2p,y2])
+		i2pd=c2i(sys,[1,x2p,y2])
+		pairpair=0
+		ppairppair=0
+		ofpairofpair=0
+		densdens=0
+		uddensdens=0
+		for pstate,pamp in psi.items():
+			p2=ProdState(pamp,pstate)
+
+			s2=p2.c(i2u).c(i2d).cd(i1u).cd(i1d)
+			pairpair+=inner(psi,  {s2.state:s2.amp})
+
+			s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
+			ppairppair+=inner(psi,  {s2.state:s2.amp})
+
+			s2=( p2.c(i2u).cd(i2u).c(i2pu).c(i2d) ).cd(i1d).cd(i1pu).c(i1u).cd(i1u)
+			ofpairofpair+=inner(psi,  {s2.state:s2.amp})
+
+			s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
+			densdens+=inner(psi,  {s2.state:s2.amp})
+
+			s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
+			uddensdens+=inner(psi,  {s2.state:s2.amp})
+
+		upnavg=1/2
+		downnavg=1/2
+		pairpairList.append(pairpair)
+		ppairppairList.append(ppairppair)
+		ofpairofpairList.append(ofpairofpair)
+		densdensList.append(densdens-upnavg*upnavg)
+		uddensdensList.append(uddensdens-upnavg*downnavg)
+
+		print("Dx="+str(deltaX)+", s-pair s-pair: "+str(pairpair))
+		print("Dx="+str(deltaX)+", p-pair p-pair: "+str(ppairppair))
+		print("Dx="+str(deltaX)+", t-pair t-pair: "+str(ofpairofpair))
+		print("Dx="+str(deltaX)+",     dens dens: "+str(densdens-upnavg*upnavg))
+		print("Dx="+str(deltaX)+",   udens ddens: "+str(uddensdens-upnavg*downnavg))
+		print()
+	
+	pl.figure(0)
+	corrList=[pairpairList,ppairppairList,ofpairofpairList,densdensList,uddensdensList]
+	corrList=[[ci/c[nx//2] for ci in c] for c in corrList]
+	corrList=[c+[c[0]] for c in corrList]
+	assert(tx==1)
+	pl.title("$U="+str(U)+"t_x$")
+	for i in range(len(corrList)):
+		pl.plot(corrList[i],label=[
+			'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(0)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x)\\rangle$',
+								'$\\langle c_{\\uparrow}(0)c_{\\downarrow}(1)c^\dagger_{\\uparrow}(x)c^\dagger_{\\downarrow}(x+1)\\rangle$',
+								'$\\langle OSO\\rangle$',
+								'$\\langle n_{\\uparrow}(0)n_{\\uparrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\uparrow}\\rangle$',
+								'$\\langle n_{\\uparrow}(0)n_{\\downarrow}(x)\\rangle-\\langle n_{\\uparrow}\\rangle\\langle n_{\\downarrow}\\rangle$'][i])
+	pl.xlabel("$x$")
+	pl.legend()
+	pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'.pdf', bbox_inches='tight',figsize=(2,1))
+	
 	# pl.figure(1)
 	# pl.hist(psi.values(),bins=300)
 
