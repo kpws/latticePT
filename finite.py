@@ -122,30 +122,6 @@ def fac(n):
 def binom(a,b):
 	return fac(a)//fac(a-b)//fac(b)
 
-def Lanczos( A, v, getZero, dot, mul, m):
-    # https://en.wikipedia.org/wiki/Lanczos_algorithm
-    V = [getZero() for i in range(m)]
-    T = np.zeros( (m,m) )
-    vo   = getZero()
-    beta = 0
-    for j in range( m-1 ):
-        w    = A(v)
-        alfa = dot(w,v)
-        w    = w - alfa * v - beta * vo
-        beta = np.sqrt( np.dot( w, w ) ) 
-        vo   = v
-        v    = w / beta 
-        T[j,j  ] = alfa 
-        T[j,j+1] = beta
-        T[j+1,j] = beta
-        V[j,:]   = v
-    w    = np.dot( A,  v )
-    alfa = np.dot( w, v )
-    w    = w - alfa * v - beta * vo
-    T[m-1,m-1] = np.dot( w, v )
-    V[m-1]     = w / np.sqrt( np.dot( w, w ) ) 
-    return T, V
-
 def HubbardH(nx,ny,mu,tx,ty,U,psi):
 	sys=[2,nx,ny]
 	newPsi={}
@@ -182,14 +158,6 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 						p2.amp*=ty
 						addToMultiState(newPsi,p2)
 	return newPsi
-
-def getOrderedSubsets(n,N,shift=0):
-	if n==0:
-		return [()]
-	if N==1:
-		return [(shift,)]
-	else:
-		return [(i+shift,)+r for i in range(N-n) for r in getOrderedSubsets(n-1,N-1-i,shift=shift+1+i)]
 
 def main():
 	nspins=2
@@ -348,7 +316,7 @@ def main():
 
 	pl.xlabel("$x$")
 	pl.legend()
-	pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'.pdf', bbox_inches='tight',figsize=(2,1))
+	pl.savefig('plots/corr_U='+str(U)+'_nx='+str(nx)+'_ny='+str(ny)+'_log.pdf', bbox_inches='tight',figsize=(2,1))
 	pl.show()
 
 
