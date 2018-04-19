@@ -53,14 +53,6 @@ class ProdState:
 				self.state=nstate
 				self.amp/=repr[i]
 
-	def same(self,other):
-		if len(self.state)!=len(other.state):
-			return False
-		for i in range(len(self.state)):
-			if self.state[i]!=other.state[i]:
-				return False
-		return True
-
 	def __str__(self):
 		return str(self.amp)+"*"+str(self.state)
 
@@ -87,18 +79,12 @@ def i2c(sys,i):
 def addToMultiState(ms,ps):
 	if ps.amp==0:
 		return
-	# ps.canonicalize()
-
 	if ps.state in ms:
 		ms[ps.state]+=ps.amp
 		# if ms[ps.state]==0:
 		# 	ms.pop(ps.state) //TODO uncomment, why does this even get called??
 	else:
 		ms[ps.state]=ps.amp
-
-def expectation(psi,op):
-	#o takes multiparticle state, gives multiparticle state
-	return inner(psi,op(psi))
 
 def symmetrize(sys,psi,group,rep):
 	out=[]
@@ -161,11 +147,11 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 
 def main():
 	nspins=2
-	nx=14
+	nx=12
 	ny=1
 	sys=[nspins,nx,ny]
 	tx=1
-	ty=tx*.1
+	ty=tx
 
 	U=4
 	nups=nx*ny//2
@@ -182,9 +168,10 @@ def main():
 	# pl.figure(1)
 	# pl.hist(psi.values(),bins=1000,range=[-.00001,.00001])
 	# pl.show()
-
-	if os.path.isfile(filename+"_corr"):
-		with open(filename+"_corr", 'rb') as f:
+	corrv=2
+	corrFilename=filename+"_corr"+"_v="+str(corrv)
+	if os.path.isfile(corrFilename):
+		with open(corrFilename, 'rb') as f:
 			corrList = pickle.load(f)
 	else:
 		if os.path.isfile(filename):
@@ -250,6 +237,10 @@ def main():
 			ofpairofpair=0
 			densdens=0
 			uddensdens=0
+
+			upnavg=nups/(nx*ny)
+			downnavg=ndowns/(nx*ny)
+
 			for pstate,pamp in psi.items():
 				p2=ProdState(pamp,pstate)
 
@@ -259,8 +250,20 @@ def main():
 				s2=p2.c(i2u).c(i2pd).cd(i1u).cd(i1pd)
 				ppairppair+=inner(psi,  {s2.state:s2.amp})
 
+				
+
 				s2=( p2.c(i2u).cd(i2u).c(i2pu).c(i2d) ).cd(i1d).cd(i1pu).c(i1u).cd(i1u)
 				ofpairofpair+=inner(psi,  {s2.state:s2.amp})
+
+				s2=( p2.c(i2pu).c(i2d) ).cd(i1d).cd(i1pu).c(i1u).cd(i1u)
+				ofpairofpair+= -upnavg*inner(psi,  {s2.state:s2.amp})
+
+				s2=( p2.c(i2u).cd(i2u).c(i2pu).c(i2d) ).cd(i1d).cd(i1pu)
+				ofpairofpair+= -upnavg*inner(psi,  {s2.state:s2.amp})
+				
+				s2=( p2.c(i2pu).c(i2d) ).cd(i1d).cd(i1pu)
+				ofpairofpair+= upnavg*upnavg*inner(psi,  {s2.state:s2.amp})
+
 
 				s2=p2.c(i2u).cd(i2u).c(i1u).cd(i1u)
 				densdens+=inner(psi,  {s2.state:s2.amp})
@@ -268,8 +271,7 @@ def main():
 				s2=p2.c(i2u).cd(i2u).c(i1d).cd(i1d)
 				uddensdens+=inner(psi,  {s2.state:s2.amp})
 
-			upnavg=nups/(nx*ny)
-			downnavg=ndowns/(nx*ny)
+			
 			pairpairList.append(pairpair)
 			ppairppairList.append(ppairppair)
 			ofpairofpairList.append(ofpairofpair)
@@ -286,7 +288,7 @@ def main():
 		corrList=[pairpairList,ppairppairList,ofpairofpairList,densdensList,uddensdensList]
 		corrList=[c+[c[0]] for c in corrList]
 
-		with open(filename+"_corr", 'wb') as f:
+		with open(corrFilename, 'wb') as f:
 			pickle.dump(corrList, f)
 	
 	assert(tx==1)
@@ -310,9 +312,15 @@ def main():
 	pl.figure(1)
 	pl.title("$U="+str(U)+"t_x$")
 	for i in range(len(corrList)):
-		pl.loglog(range(1,nx//2+1),np.abs(corrList[i][1:nx//2+1]),label=corrNames[i],marker='.')
-	# xs=np.linspace(0,nx,200)
-	# pl.loglog(xs,xs*2+0*(nx-xs)**-5,ls='--')
+		subset=[s for s in range(1,nx//2+1) if corrList[i][s]!=0]
+		pl.loglog(subset,np.abs(corrList[i])[subset],label=corrNames[i],marker='.')
+	xs=np.linspace(1,nx//2,200)
+	
+	for i in range(2):
+		p=[1,4][i]
+		a=[.08,.04][i]
+		pl.loglog(xs,a*(xs**-p+(nx-xs)**-p),linestyle='--')
+
 
 	pl.xlabel("$x$")
 	pl.legend()
