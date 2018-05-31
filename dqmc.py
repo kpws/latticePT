@@ -104,38 +104,41 @@ def main():
 	mu=0
 
 	nThreads=8
-	nWarmupSweeps=100
-	nSweepsPerThread=2500
+	nWarmupSweeps=10
+	nSweepsPerThread=250
 
 	# ops=[(lambda g:g[0]),(lambda g:g[1]),(lambda g:2-g[0][0,0]-g[1][0,0])]
 	opnames=["<n>","<nn>"]
 	ops=[(lambda g:2-g[0][0,0]-g[1][0,0]),(lambda g:1-g[0][0,0]-g[1][0,0]+g[0][0,0]*g[1][0,0])]
 
-	opnames=[f"<g{i}>" for i in range(nx)]
+	opnames=["<g{i}>".format(i=i) for i in range(nx)]
 	ops=[lambda g,i=i:g[0][0,i] for i in range(nx)]
 
 	opnames=["g"]
 	ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
 
-	import threading
+	import multiprocessing
 	import time
-	class Worker (threading.Thread):
-		def __init__(self, seed):
-			threading.Thread.__init__(self)
-			self.seed=seed
-		def run(self):
-			self.res=dqmc(nx,ny,tx,ty,U,mu,beta,int(beta*tausPerBeta)//m,m,self.seed,nWarmupSweeps,nSweepsPerThread,ops)
-	threads=[Worker(i) for i in range(nThreads)]
+	def work(seed,return_dict):
+		ret=dqmc(nx,ny,tx,ty,U,mu,beta,int(beta*tausPerBeta)//m,m,seed,nWarmupSweeps,nSweepsPerThread,ops)
+		return_dict[seed] = ret
+
+	manager = multiprocessing.Manager()
+	return_dict = manager.dict()
+	job=[multiprocessing.Process(target=work, args=(i,return_dict)) for i in range(nThreads)]
 	startTime=time.time()
-	for t in threads: t.start()
-	for t in threads: t.join()
+	print("Starting {n} jobs...".format(n=nThreads))
+	for t in job: t.start()
+	print("Waiting for {n} jobs...".format(n=nThreads))
+	for t in job: t.join()
 	print(f"Time per sweep: {1000*(time.time()-startTime)/(nSweepsPerThread+nWarmupSweeps)/nThreads:.2f} ms")
 	print("Operators:")
+	res=return_dict.values()
 	for i in range(len(ops)):
-		res=[t.res[i] for t in threads]
-		mean=np.mean(res,axis=0)
-		std=np.std(res,axis=0,ddof=1)/np.sqrt(nThreads)
-		print(f"{opnames[i]} = {mean} ± {std}")
+		ri=[res[t][i] for t in range(nThreads)]
+		mean=np.mean(ri,axis=0)
+		std=np.std(ri,axis=0,ddof=1)/np.sqrt(nThreads)
+		print("{name} = {mean} ± {std}".format(name=opnames[i],mean=mean,std=std))
 
 
 if __name__ == "__main__":
