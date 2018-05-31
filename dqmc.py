@@ -94,8 +94,8 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 
 def main():
 	nx=2
-	ny=1
-	U=4
+	ny=2
+	U=2
 	tx=1
 	ty=1
 	beta=2/tx
@@ -104,12 +104,18 @@ def main():
 	mu=0
 
 	nThreads=8
-	nWarmupSweeps=10
-	nSweepsPerThread=150
+	nWarmupSweeps=100
+	nSweepsPerThread=2500
 
 	# ops=[(lambda g:g[0]),(lambda g:g[1]),(lambda g:2-g[0][0,0]-g[1][0,0])]
 	opnames=["<n>","<nn>"]
 	ops=[(lambda g:2-g[0][0,0]-g[1][0,0]),(lambda g:1-g[0][0,0]-g[1][0,0]+g[0][0,0]*g[1][0,0])]
+
+	opnames=[f"<g{i}>" for i in range(nx)]
+	ops=[lambda g,i=i:g[0][0,i] for i in range(nx)]
+
+	opnames=["g"]
+	ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
 
 	import threading
 	import time
