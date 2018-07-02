@@ -102,7 +102,7 @@ class greensFunction:
 
 	def inv(self):
 		#return greensFunction(self.stat,self.T,v=np.flip(np.flip(np.flip(self.v,0),1),2))
-		return greensFunction(self.stat,self.T,v=1/self.v)
+		return greensFunction(self.stat,self.T,v=np.reciprocal(self.v))
 
 	def __pow__(self,g2):
 		assert self.compatible(g2)

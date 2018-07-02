@@ -22,7 +22,7 @@ def calcGFromScratch(Kexp,lamb,state,tau,deltaTau,mu,N,ntau,B):
 
 	return [np.linalg.inv(np.eye(N,N)+Ml[sigi]) for sigi in range(2)]
 
-def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observables):
+def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observables,observablesTD=[]):
 	rand=random.Random()
 	rand.seed(seed)
 	
@@ -51,10 +51,12 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 	
 	state=[np.array([rand.choice([-1,1]) for i in range(N)]) for tau in range(ntau)]
 	res=[0 for o in observables]
+	resTD=[0 for o in observablesTD]
 
 	for sweep in range(nWarmupSweeps+nSweeps):
 		B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
 		g=calcGFromScratch(Kexp,lamb,state,0,deltaTau,mu,N,ntau,B)
+		gTimeDep=np.zeros((2,ntau,nx*ny,nx*ny))
 		for tau in range(ntau):
 			# B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
 			# g=calcGFromScratch(Kexp,lamb,state,tau,deltaTau,mu,N,ntau,B)
@@ -79,6 +81,15 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 			if sweep>=nWarmupSweeps:
 				for oi in range(len(observables)):
 					res[oi]+=observables[oi](g)
+				if len(observablesTD)!=0:
+					for sigi in range(2):
+						gTimeDep[sigi][0]=g[sigi]
+						# https://link.springer.com/content/pdf/10.1007%2F978-1-4613-0565-1.pdf
+						for i in range(1,ntau):
+							gTimeDep[sigi][i]=gTimeDep[sigi][i-1]@B[sigi][(tau+i)%ntau]
+					for oi in range(len(observablesTD)):
+						resTD[oi]+=observablesTD[oi](gTimeDep)
+				
 			# B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
 			# g=calcGFromScratch(Kexp,lamb,state,(tau+1)%ntau,deltaTau,mu,N,ntau,B)
 			g=[ np.linalg.inv(B[sigi][(tau+1)%ntau])@g[sigi]@B[sigi][(tau+1)%ntau] for sigi in range(2)]
@@ -90,22 +101,27 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 		# if sweep%10==0:
 		#  	print([r/(sweep+1) for r in res])
 			
-	return [r/nSweeps/ntau for r in res]
+	if len(observablesTD)!=0:
+		return ([r/nSweeps/ntau for r in res],[r/nSweeps/ntau for r in resTD])
+	else:
+		return [r/nSweeps/ntau for r in res]
 
 def main():
 	nx=2
 	ny=2
-	U=2
+	U=4
 	tx=1
 	ty=1
-	beta=2/tx
+	beta=1/tx #2/tx
 	m=8
 	tausPerBeta=8 #8 recommended in literature
 	mu=0
 
+	ntau=(int(beta*tausPerBeta)//m)*m
+
 	nThreads=8
-	nWarmupSweeps=10
-	nSweepsPerThread=250
+	nWarmupSweeps=4*100
+	nSweepsPerThread=4*650
 
 	# ops=[(lambda g:g[0]),(lambda g:g[1]),(lambda g:2-g[0][0,0]-g[1][0,0])]
 	opnames=["<n>","<nn>"]
@@ -115,12 +131,13 @@ def main():
 	ops=[lambda g,i=i:g[0][0,i] for i in range(nx)]
 
 	opnames=["g"]
-	ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
+	ops=[lambda g:g[0]]
+	# ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
 
 	import multiprocessing
 	import time
 	def work(seed,return_dict):
-		ret=dqmc(nx,ny,tx,ty,U,mu,beta,int(beta*tausPerBeta)//m,m,seed,nWarmupSweeps,nSweepsPerThread,ops)
+		ret=dqmc(nx,ny,tx,ty,U,mu,beta,int(beta*tausPerBeta)//m,m,seed,nWarmupSweeps,nSweepsPerThread,[],observablesTD=ops)
 		return_dict[seed] = ret
 
 	manager = multiprocessing.Manager()
@@ -131,14 +148,30 @@ def main():
 	for t in job: t.start()
 	print("Waiting for {n} jobs...".format(n=nThreads))
 	for t in job: t.join()
-	print(f"Time per sweep: {1000*(time.time()-startTime)/(nSweepsPerThread+nWarmupSweeps)/nThreads:.2f} ms")
+	print("Time per sweep: {time:.2f} ms".format(time=1000*(time.time()-startTime)/(nSweepsPerThread+nWarmupSweeps)/nThreads))
 	print("Operators:")
 	res=return_dict.values()
+	print(len(res))
 	for i in range(len(ops)):
-		ri=[res[t][i] for t in range(nThreads)]
-		mean=np.mean(ri,axis=0)
-		std=np.std(ri,axis=0,ddof=1)/np.sqrt(nThreads)
-		print("{name} = {mean} ± {std}".format(name=opnames[i],mean=mean,std=std))
+		#res[t][1][i] - time dep part
+		r=[res[t][1][i] for t in range(nThreads)]
+		mean=np.mean(r,axis=0)
+		std=np.std(r,axis=0)
+		if opnames[i]=="g":
+			g=np.zeros((ntau,nx,ny))
+			for tau in range(ntau):
+				for x in range(nx):
+					for y in range(ny):
+						for dx in range(nx):
+							for dy in range(ny):
+								g[tau,x,y]+=mean[tau,dx+dy*nx,(dx+x)%nx+((dy+y)%ny)*nx]/(nx*ny)
+			print(g)
+			# print("{name} = {mean} ± {std}".format(name=opnames[i],mean=mean,std=std))
+		else:
+			ri=[res[t][i] for t in range(nThreads)]
+			mean=np.mean(ri,axis=0)
+			std=np.std(ri,axis=0,ddof=1)/np.sqrt(nThreads)
+			print("{name} = {mean} ± {std}".format(name=opnames[i],mean=mean,std=std))
 
 
 if __name__ == "__main__":

@@ -30,7 +30,6 @@ class ProdState:
 			return ProdState(self.amp*(1 if pos%2==0 else -1),self.state[:pos]+self.state[pos+1:])
 
 	def cd(self,i):
-		parity=1
 		ip=len(self.state)
 		for pos in range(len(self.state)):
 			p=self.state[pos]
@@ -86,6 +85,63 @@ def addToMultiState(ms,ps):
 	else:
 		ms[ps.state]=ps.amp
 
+def add(ms1,ms2):
+	ret={}
+	for s,a in ms1.items():
+		if s in ret:
+			ret[s]+=a
+		else:
+			ret[s]=a
+	for s,a in ms2.items():
+		if s in ret:
+			ret[s]+=a
+		else:
+			ret[s]=a
+	return ret
+
+def addToFirst(ms1,ms2,mul=1):
+	for s,a in ms2.items():
+		if s in ms1:
+			ms1[s]+=a*mul
+		else:
+			ms1[s]=a*mul
+
+def c(i,psi):
+	ret={}
+	for state,amp in psi.items():
+		pos=-1
+		for j in range(len(state)):
+			if i==state[j]:
+				cstate=state[:j]+state[j+1:]
+				camp=amp*(1 if j%2==0 else -1)
+				if cstate in ret:
+					ret[cstate]+=camp
+				else:
+					ret[cstate]=camp
+				break
+	return ret
+
+def cd(i,psi):
+	ret={}
+	for state,amp in psi.items():		
+		ip=len(state)
+		for j in range(len(state)):
+			p=state[j]
+			if p==0:
+				ip=-1
+				break
+			if p>i:
+				ip=j
+				break
+		if ip!=-1:
+			camp=amp if j%2==0 else -amp
+			cstate=state[:j]+(i,)+state[j:]
+			if cstate in ret:
+				ret[cstate]+=camp
+			else:
+				ret[cstate]=camp
+	return ret
+
 def symmetrize(sys,psi,group,rep):
 	out=[]
 	for p in psi:
@@ -113,13 +169,18 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 	newPsi={}
 	for pstate,pamp in psi.items():
 		p=ProdState(pamp,pstate)
-		p2=ProdState(mu*p.amp,p.state)
-		addToMultiState(newPsi,p2)
 
 		for ix in range(nx):
 			for iy in range(ny):
 				i0u=c2i(sys,[0,ix,iy])
 				i0d=c2i(sys,[1,ix,iy])
+				p2=p.c(i0u).cd(i0u)
+				p2.amp*=-mu
+				addToMultiState(newPsi,p2)
+				p2=p.c(i0d).cd(i0d)
+				p2.amp*=-mu
+				addToMultiState(newPsi,p2)
+
 				p2=p.c(i0d).cd(i0d).c(i0u).cd(i0u)
 				p2.amp*=U
 				addToMultiState(newPsi,p2)

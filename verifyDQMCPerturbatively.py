@@ -3,7 +3,7 @@ import numpy as np
 
 nx=2
 ny=2
-U=2
+U=.5
 tx=1
 ty=1 if ny>1 else 0
 t2=0
@@ -11,7 +11,7 @@ beta=2/tx
 tausPerBeta=8
 mu=0
 nc=int(tausPerBeta//beta)
-nc=10240
+nc=20240
 
 G=greensFunction(-1,1/beta).fromFun(nc,nx,ny,lambda omega,kx,ky:1/(1j*omega-(-2*tx*np.cos(kx)-2*ty*np.cos(ky)-2*t2*np.cos(kx+ky)-mu)))
 # G=greensFunction(-1,1/beta).fromFun(nc,nx,ny,lambda omega,kx,ky:kx)
