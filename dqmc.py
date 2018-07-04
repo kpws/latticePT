@@ -109,7 +109,7 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 def main():
 	nx=2
 	ny=2
-	U=4
+	U=0
 	tx=1
 	ty=1
 	beta=1/tx #2/tx
@@ -120,8 +120,8 @@ def main():
 	ntau=(int(beta*tausPerBeta)//m)*m
 
 	nThreads=8
-	nWarmupSweeps=4*100
-	nSweepsPerThread=4*650
+	nWarmupSweeps=100
+	nSweepsPerThread=250
 
 	# ops=[(lambda g:g[0]),(lambda g:g[1]),(lambda g:2-g[0][0,0]-g[1][0,0])]
 	opnames=["<n>","<nn>"]
@@ -131,7 +131,18 @@ def main():
 	ops=[lambda g,i=i:g[0][0,i] for i in range(nx)]
 
 	opnames=["g"]
-	ops=[lambda g:g[0]]
+	def averageG(g):
+		ag=np.zeros((ntau,nx,ny))
+		for sigi in range(2):
+				for x in range(nx):
+					for y in range(ny):
+						for dx in range(nx):
+							for dy in range(ny):
+								ag[:,x,y]+=g[sigi][:,dx+dy*nx,(dx+x)%nx+((dy+y)%ny)*nx]
+		return ag/(2*nx*ny)
+
+	ops=[lambda g:(g[0]+g[1])*.5]
+	ops=[averageG]
 	# ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
 
 	import multiprocessing
@@ -157,16 +168,18 @@ def main():
 		r=[res[t][1][i] for t in range(nThreads)]
 		mean=np.mean(r,axis=0)
 		std=np.std(r,axis=0)
+		print
 		if opnames[i]=="g":
-			g=np.zeros((ntau,nx,ny))
-			for tau in range(ntau):
-				for x in range(nx):
-					for y in range(ny):
-						for dx in range(nx):
-							for dy in range(ny):
-								g[tau,x,y]+=mean[tau,dx+dy*nx,(dx+x)%nx+((dy+y)%ny)*nx]/(nx*ny)
-			print(g)
-			# print("{name} = {mean} ± {std}".format(name=opnames[i],mean=mean,std=std))
+			# g=np.zeros((ntau,nx,ny))
+			# for tau in range(ntau):
+			# 	for x in range(nx):
+			# 		for y in range(ny):
+			# 			for dx in range(nx):
+			# 				for dy in range(ny):
+			# 					g[tau,x,y]+=mean[tau,dx+dy*nx,(dx+x)%nx+((dy+y)%ny)*nx]/(nx*ny)
+
+			# print(g)
+			print("{name} = {mean}\n±\n{std}".format(name=opnames[i],mean=mean,std=std))
 		else:
 			ri=[res[t][i] for t in range(nThreads)]
 			mean=np.mean(ri,axis=0)

@@ -40,10 +40,6 @@ class ProdState:
 				ip=pos
 				break
 		return ProdState(self.amp if ip%2==0 else -self.amp,self.state[:ip]+(i,)+self.state[ip:])
-	
-	def op(O):
-		O()
-		ProdState(self.amp if ip%2==0 else -self.amp,self.state[:ip]+(i,)+self.state[ip:])
 
 	def toEquivClass(self,group,repr):
 		for i in range(len(group)):
@@ -109,15 +105,14 @@ def addToFirst(ms1,ms2,mul=1):
 def c(i,psi):
 	ret={}
 	for state,amp in psi.items():
-		pos=-1
 		for j in range(len(state)):
 			if i==state[j]:
 				cstate=state[:j]+state[j+1:]
-				camp=amp*(1 if j%2==0 else -1)
-				if cstate in ret:
-					ret[cstate]+=camp
-				else:
-					ret[cstate]=camp
+				camp=amp if j%2==0 else -amp
+				# if cstate in ret:
+				# 	ret[cstate]+=camp
+				# else:
+				ret[cstate]=camp
 				break
 	return ret
 
@@ -127,19 +122,19 @@ def cd(i,psi):
 		ip=len(state)
 		for j in range(len(state)):
 			p=state[j]
-			if p==0:
+			if i==p:
 				ip=-1
 				break
-			if p>i:
+			if i<p:
 				ip=j
 				break
 		if ip!=-1:
-			camp=amp if j%2==0 else -amp
-			cstate=state[:j]+(i,)+state[j:]
-			if cstate in ret:
-				ret[cstate]+=camp
-			else:
-				ret[cstate]=camp
+			camp=amp if ip%2==0 else -amp
+			cstate=state[:ip]+(i,)+state[ip:]
+			# if cstate in ret:
+			# 	ret[cstate]+=camp
+			# else:
+			ret[cstate]=camp
 	return ret
 
 def symmetrize(sys,psi,group,rep):
@@ -191,19 +186,18 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 					iy1=c2i(sys,[ialpha,ix,(iy+1)%ny])
 
 					p2=p.c(i0).cd(ix1)
-					p2.amp*=tx
+					p2.amp*=-tx
 					addToMultiState(newPsi,p2)
 					p2=p.c(ix1).cd(i0)
-					p2.amp*=tx
+					p2.amp*=-tx
 					addToMultiState(newPsi,p2)
-
-					if ny>1:
-						p2=p.c(i0).cd(iy1)
-						p2.amp*=ty
-						addToMultiState(newPsi,p2)
-						p2=p.c(iy1).cd(i0)
-						p2.amp*=ty
-						addToMultiState(newPsi,p2)
+					
+					p2=p.c(i0).cd(iy1)
+					p2.amp*=-ty
+					addToMultiState(newPsi,p2)
+					p2=p.c(iy1).cd(i0)
+					p2.amp*=-ty
+					addToMultiState(newPsi,p2)
 	return newPsi
 
 def main():
