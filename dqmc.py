@@ -112,7 +112,7 @@ def main():
 	U=0
 	tx=1
 	ty=1
-	beta=1/tx #2/tx
+	beta=2/tx #2/tx
 	m=8
 	tausPerBeta=8 #8 recommended in literature
 	mu=0

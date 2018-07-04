@@ -16,7 +16,14 @@ from finite import *
 def evolve(state, eigenstates, energies, tau):
 	ret={}
 	for i in range(len(eigenstates)):
-		addToFirst(ret, eigenstates[i], inner(state,  eigenstates[i])*np.exp(-tau*energies[i])  )
+		addToFirst(ret, eigenstates[i], inner(eigenstates[i],state)*np.exp(-tau*energies[i])  )
+	return ret
+
+def evolveMany(state, eigenstates, energies, taus):
+	ret={}
+	rep=[inner(e,state) for e in eigenstates]
+	for i in range(len(eigenstates)):
+		addToFirst(ret, eigenstates[i], rep*np.exp(-tau*energies[i])  )
 	return ret
 
 def solveHubbard(nx,ny,tx,ty,U,nUps,nDowns,nStates,verbose=False):
@@ -59,12 +66,12 @@ def solveHubbard(nx,ny,tx,ty,U,nUps,nDowns,nStates,verbose=False):
 def main():
 	nspins=2
 	nx=2
-	ny=1
+	ny=2
 	sys=(nspins,nx,ny)
 	tx=1
-	ty=0*tx
+	ty=1*tx
 
-	U=8
+	U=0
 	beta=2 #2/tx
 	nUps=nx*ny//2
 	nDowns=nx*ny//2
@@ -77,11 +84,8 @@ def main():
 	ntau=int(beta*tausPerBeta)
 
 	psis,Es=solveHubbard(nx,ny,tx,ty,U,nUps,nDowns,-1)
-	psism1u,Esm1u=solveHubbard(nx,ny,tx,ty,U,nUps-1,nDowns,-1)
-	# Es=-Es
-	
+	# psism1u,Esm1u=solveHubbard(nx,ny,tx,ty,U,nUps-1,nDowns,-1)
 
-	# weights=[np.exp(-beta*e) for e in Es]
 	weights=np.exp(-beta*Es)
 	Z=sum(weights)
 	weights/=Z
@@ -102,29 +106,32 @@ def main():
 	for psii in range(len(Es)):
 		psi=psis[psii]
 		w=weights[psii]
-
-		# print(psi)
-		# print(inner(psi,HubbardH(nx,ny,0,tx,ty,U,psi)))
-		# print(psi)
-		# print(cd(iup,c(iup,psi )))
-		# print(inner(psi,cd(idown,c(idown,cd(iup,c(iup,psi ))))))
+		print(w)
+		if w<1e-5:
+			break
 		E+=w*Es[psii]
 		nupndown+=w*inner(psi,cd(idown,c(idown,cd(iup,c(iup,psi )))))
 		S+=w*(2*inner(psi,cd(i2down,c(i2down,cd(idown,c(idown,psi )))))-2*inner(psi,cd(i2down,c(i2down,cd(iup,c(iup,psi ))))))
 		for i in range(2*nx*ny):
 			n+=w*inner(psi,cd(i,c(i,psi)))
-		for x in range(nx):
-			for y in range(ny):
-				for taui in range(ntau):
-					tau=beta*taui/ntau
-					origin=c2i(sys,[0,0,0])
+		origin=c2i(sys,[0,0,0])
+		p2=cd(origin,psi)
+		rep=[inner(e,p2) for e in psis]
+		for taui in range(ntau):
+			tau=beta*taui/ntau	
+			# ev=evolve(cd(origin,evolve(psi, psis, Es, -tau)), psis, Es, tau)
+			ev={}
+			for i in range(len(psis)):
+				addToFirst(ev, psis[i], rep[i]*np.exp(tau*(Es[psii]-Es[i]))  )
+			for x in range(nx):
+				for y in range(ny):
 					i=c2i(sys,[0,x,y])
-					# g[taui,x,y]+=w*inner(psi, cd(origin, evolve(c(i,evolve(psi, psis, Es, -tau)), psism1u, Esm1u, tau)))	
+					g[taui,x,y]+=w*inner(psi, c(i, ev))
 	print("filling: {n}".format(n=n/(2*nx*ny)))
 	print("E per site: {E}".format(E=(E+n*U/2)/(nx*ny)))
 	print("nupndown: {nupndown}".format(nupndown=nupndown))
 	print("SiSi+1: {S}".format(S=S))
-	# print(g)
+	print(g)
 
 
 if __name__ == "__main__":
