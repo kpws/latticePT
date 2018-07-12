@@ -223,7 +223,7 @@ def optimizeRun(nx,ny,tx,ty,U,mu,beta,m,tausPerBeta,nWarmupSweeps,tdops,stabiliz
 	ntau=math.ceil(beta*tausPerBeta/m)*m
 
 	warmupMargin=3
-	autoCorrSamples=25
+	autoCorrSamples=50
 	print("Measuring metropolis correlation length...")
 	_,autocorr,state=dqmc(nx,ny,tx,ty,U,mu,beta,ntau//m,m,0,nWarmupSweeps,
 		nWarmupSweeps*autoCorrSamples//warmupMargin,stabilize,[],autoCorrN=nWarmupSweeps//warmupMargin,returnState=True)

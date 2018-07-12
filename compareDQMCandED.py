@@ -7,20 +7,20 @@ import math
 nx=2
 ny=2
 tx=1
-ty=1/2
+ty=2
 U=4
 mu=0
 beta=2
 
 m=8
-tausPerBeta=16
+tausPerBeta=8 #trotter decomposition, increase for better accuracy
 
 nTau=math.ceil(beta*tausPerBeta/m)*m
 
 nThreads=1  #multithreading doesn't work on mac, (wtf) https://stackoverflow.com/questions/9879371/segfault-using-numpys-lapack-lite-with-multiprocessing-on-osx-not-linux)
 nSamples=10
-nWarmupSweeps=nTau*20
-nSweepsPerThread=30*nWarmupSweeps
+nWarmupSweeps=200
+nSweepsPerThread=20*nWarmupSweeps #increase for less statistical error
 
 taus=[taui/nTau*beta for taui in range(nTau)]
 
@@ -36,7 +36,6 @@ for x in range(nx):
 		c=colors[(x+nx*y)%len(colors)]
 		pl.plot(taus, ed_g[:,x,y],linestyle='--',color=c,label=r"$G_{{\mathrm{{ED}}}}({x},{y})$".format(x=x,y=y))
 		pl.errorbar(taus, dqmc_g[:,x,y], yerr=dqmc_gerr[:,x,y],color=c,linestyle='-',label=r"$G_{{\mathrm{{DQMC}}}}({x},{y})$".format(x=x,y=y))
-		# pl.errorbar(taus, dqmc_ns_g[:,x,y], yerr=dqmc_ns_gerr[:,x,y],linestyle='--',color='b')
 pl.ylim([-1,1])
 pl.xlabel(r"$\tau$")
 pl.ylabel(r"$G(x,y)$")
