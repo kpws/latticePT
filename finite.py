@@ -76,8 +76,8 @@ def addToMultiState(ms,ps):
 		return
 	if ps.state in ms:
 		ms[ps.state]+=ps.amp
-		# if ms[ps.state]==0:
-		# 	ms.pop(ps.state) //TODO uncomment, why does this even get called??
+		if ms[ps.state]==0:
+			ms.pop(ps.state) #//TODO uncomment, why does this even get called??
 	else:
 		ms[ps.state]=ps.amp
 

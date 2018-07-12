@@ -1,28 +1,69 @@
 import numpy as np
 import random
+import math
 import scipy
 from scipy import linalg
 from numpy import linalg
 from functools import reduce
+import multiprocessing
+import time
+
+def calcB(Kexp,lamb,deltaTau,state,mu):
+	return [Kexp@np.diag([np.exp( lamb*sig*s + deltaTau*mu ) for s in state])  for sig in [-1,1]]
 
 def calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau):
 	return [[Kexp@np.diag([np.exp( lamb*sig*state[li][i] + deltaTau*mu ) for i in range(N)]) for li in range(ntau)] for sig in [-1,1]]
 
-def calcGFromScratch(Kexp,lamb,state,tau,deltaTau,mu,N,ntau,B):
-	stabilize=False
+def calcGFromScratch(Kexp,lamb,state,taui,deltaTau,mu,N,m,ntauOverm,B,stabilize):
+	ntau=m*ntauOverm
 	if stabilize:
-		mB=[[reduce(lambda a,b:a@b,(B[sig][(tau-(j+1)*m+i+1)%ntau] for i in range(m))) for j in range(ntauOverm)] for sig in range(2)]
-		for mb in mB:
-			U,S,VH=numpy.linalg.svd(mb)
+		mB=[[reduce(lambda a,b:a@b,(B[sig][(taui+j*m+i+1)%ntau] for i in range(m))) for j in range(ntauOverm)] for sig in range(2)]
+
+		Ml=[0,0]
+		ret=[0,0]
+		for sigi in range(2):
+			U,D,V=np.linalg.svd(mB[sigi][-1])
+			for i in range(len(mB[sigi])-2,-1,-1):
+				U,D,Vp=np.linalg.svd((mB[sigi][i]@U)@np.diag(D))
+				V=Vp@V
+			# Ml[sigi]=U@np.diag(D)@V
+			Up,Dp,Vp=np.linalg.svd(np.transpose(U)@np.transpose(V)+np.diag(D))
+			ret[sigi]=(np.transpose(V)@np.transpose(Vp))@np.diag(1/Dp)@(np.transpose(Up)@np.transpose(U))
+		# for mb in mB:
+			# U,D,V=numpy.linalg.svd(mb)
+		
+		# Ml=[mB[sigi][0] for sigi in range(2)]
+		# for il in range(1,ntauOverm):
+		# 	for sigi in range(2):
+		# 		Ml[sigi]=Ml[sigi] @ mB[sigi][il]
+
+		return ret
 	else:
-		Ml=[B[0][(tau+1)%ntau], B[1][(tau+1)%ntau]]
+		Ml=[B[sigi][(taui+1)%ntau] for sigi in range(2)]
 		for il in range(1,ntau):
 			for sigi in range(2):
-				Ml[sigi]=Ml[sigi] @ B[sigi][(tau+1+il)%ntau]
+				Ml[sigi]=Ml[sigi] @ B[sigi][(taui+1+il)%ntau]
 
-	return [np.linalg.inv(np.eye(N,N)+Ml[sigi]) for sigi in range(2)]
+		return [np.linalg.inv(np.eye(N,N)+Ml[sigi]) for sigi in range(2)]
 
-def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observables,observablesTD=[]):
+def stableProd(Bs,N,m):
+	if len(Bs)==0:
+		return np.eye(N,N),np.eye(N,N),np.eye(N,N)
+	mB=[reduce(lambda a,b:a@b, Bs[m*i:min(m*i+m,len(Bs))]) for i in range((len(Bs)+m-1)//m)]
+	# U,D,V=np.linalg.svd(mB[0])
+	# for i in range(1,len(mB)):
+	# 	Up,D,V=np.linalg.svd(np.diag(D)@(V@mB[i]))
+	# 	U=U@Up
+	# return U,D,V
+
+	U,D,V=np.linalg.svd(mB[-1])
+	for i in range(len(mB)-2,-1,-1):
+		U,D,Vp=np.linalg.svd((mB[i]@U)@np.diag(D))
+		V=Vp@V
+	return U,D,V
+
+def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,stabilize,
+	observables,observablesTD=[],stabEps=1e-4,autoCorrN=0,profile=False,returnState=False,startState=None,measurePeriod=1):
 	rand=random.Random()
 	rand.seed(seed)
 	
@@ -33,7 +74,12 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 	N=nx*ny
 	K=np.zeros((N,N))
 	sigs=[-1,1]
-	
+	if autoCorrN>0:
+		old=[None for i in range(autoCorrN)]
+		autoCorr=[0 for i in range(autoCorrN)]
+		autoCorrSamples=0
+		avCorrVal=0
+
 	for x in range(nx):
 		for y in range(ny):
 			xp=(x-1)%nx
@@ -43,73 +89,230 @@ def dqmc(nx,ny,tx,ty,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,observable
 			here=x+nx*y
 			K[here, xp%nx+nx*y]-=tx
 			K[here, xn%nx+nx*y]-=tx
-			if ny>1:
-				K[here, x%nx+nx*yp]-=ty
-				K[here, x%nx+nx*yn]-=ty
+			# if ny>1:
+			K[here, x%nx+nx*yp]-=ty
+			K[here, x%nx+nx*yn]-=ty
 
 	Kexp=scipy.linalg.expm(-deltaTau*K)
 	
-	state=[np.array([rand.choice([-1,1]) for i in range(N)]) for tau in range(ntau)]
+	if startState==None:
+		state=[np.array([rand.choice([-1,1]) for i in range(N)]) for tau in range(ntau)]
+	else:
+		state=startState
+
 	res=[0 for o in observables]
 	resTD=[0 for o in observablesTD]
 
+	B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
+	g=calcGFromScratch(Kexp,lamb,state,0,deltaTau,mu,N,m,ntauOverm,B,stabilize)
+	attempts=0
+	accepted=0
+	nMeasures=0
+	
+	gTimeDep=np.zeros((2,ntau,nx*ny,nx*ny))
+	if profile: startTime=time.clock()
 	for sweep in range(nWarmupSweeps+nSweeps):
-		B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
-		g=calcGFromScratch(Kexp,lamb,state,0,deltaTau,mu,N,ntau,B)
-		gTimeDep=np.zeros((2,ntau,nx*ny,nx*ny))
-		for tau in range(ntau):
-			# B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
-			# g=calcGFromScratch(Kexp,lamb,state,tau,deltaTau,mu,N,ntau,B)
+		if seed==0:
+			print("Progress {:2.1%}".format(sweep/(nWarmupSweeps+nSweeps)), end="\r")
+		
+		for taui in range(ntau):
 			for u in range(nx*ny):
 				x=rand.randrange(nx)
 				y=rand.randrange(ny)
-				ii=x+nx*y
-				
-				delta=[np.exp(-2*sigs[sigi]*lamb*state[tau][ii])-1 for sigi in range(2)]
+				# ii=x+nx*y
+				ii=u
+				delta=[np.exp(-2*sigs[sigi]*lamb*state[taui][ii])-1 for sigi in range(2)]
 				R=[1+(1-g[sigi][ii,ii])*delta[sigi] for sigi in range(2)]
 				Rprod=R[0]*R[1]
 				p=abs(Rprod/(1+Rprod))
-				# print(p)
+				attempts+=1
 				if p>1 or rand.random()<p:
-					state[tau][ii]*=-1
-					# g=calcGFromScratch(Kexp,lamb,state,tau,deltaTau,mu,N,ntau)
+					accepted+=1
+					state[taui][ii]*=-1
 					for sigi in range(2):
 						g[sigi]-=np.outer([1 if ii==i else 0 for i in range(N)]-g[sigi][::,ii],g[sigi][ii,::]*delta[sigi])/R[sigi]
-			# for sigi in range(2):
-				# B[sigi][tau]=Kexp@np.diag([np.exp(lamb*sigs[sigi]*state[tau][i]+deltaTau*mu) for i in range(N)])
 			
+			tB=calcB(Kexp,lamb,deltaTau,state[taui],mu)
+			for sigi in range(2):
+				B[sigi][taui]=tB[sigi]
+
 			if sweep>=nWarmupSweeps:
-				for oi in range(len(observables)):
-					res[oi]+=observables[oi](g)
-				if len(observablesTD)!=0:
-					for sigi in range(2):
-						gTimeDep[sigi][0]=g[sigi]
-						# https://link.springer.com/content/pdf/10.1007%2F978-1-4613-0565-1.pdf
-						for i in range(1,ntau):
-							gTimeDep[sigi][i]=gTimeDep[sigi][i-1]@B[sigi][(tau+i)%ntau]
-					for oi in range(len(observablesTD)):
-						resTD[oi]+=observablesTD[oi](gTimeDep)
-				
-			# B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
-			# g=calcGFromScratch(Kexp,lamb,state,(tau+1)%ntau,deltaTau,mu,N,ntau,B)
-			g=[ np.linalg.inv(B[sigi][(tau+1)%ntau])@g[sigi]@B[sigi][(tau+1)%ntau] for sigi in range(2)]
+				if autoCorrN>0:
+					corrVal=np.array(state)
+					corrVal=g[0]
+					old=[corrVal if i==0 else old[i-1] for i in range(autoCorrN)]
+					if sweep-nWarmupSweeps>=autoCorrN-1:
+						avCorrVal+=corrVal
+						autoCorrSamples+=1
+						for i in range(autoCorrN):
+							autoCorr[i]+=corrVal*old[i]
+				if profile and taui==0 and sweep==nWarmupSweeps:
+						startMeasTime=time.clock()
+				if (sweep-nWarmupSweeps)%measurePeriod==0:
+					nMeasures+=1
+					for oi in range(len(observables)):
+						res[oi]+=observables[oi](g)
+					if len(observablesTD)!=0:
+						for sigi in range(2):
+							# https://link.springer.com/content/pdf/10.1007%2F978-1-4613-0565-1.pdf
+							if stabilize:
+								if False:
+									gTimeDep[sigi][0]=g[sigi]
+									U,D,V=np.linalg.svd(gTimeDep[sigi][0])
+									for i in range(1,ntau):
+										Up,D,V=np.linalg.svd(np.diag(D)@(V@B[sigi][(taui+i)%ntau]))
+										U=U@Up
+										gTimeDep[sigi][i]=U@np.diag(D)@V
+								else:
+									for i in range(0,ntau,1):
+										if i==0:
+											gTimeDep[sigi][i]=g[sigi]
+										else:
+											Ul,Dl,Vl=stableProd([B[sigi][(taui+i-j)%ntau] for j in range(i)],N,m)
+											Ur,Dr,Vr=stableProd([B[sigi][(taui+ntau-j)%ntau] for j in range(ntau-i)],N,m)
+											Up,Dp,Vp=np.linalg.svd(np.diag(1/Dl)@(np.transpose(Ul)@np.transpose(Vr))+(Vl@Ur)@np.diag(Dr))
+											# c=min(Dp)/max(Dp)
+											# if abs(c)<1e-7:
+											# 	print(str(i/(ntau-1))+", "+str(c))
+											gTimeDep[sigi][i]=(np.transpose(Vr)@np.transpose(Vp))@np.diag(1/Dp)@(np.transpose(Up)@Vl)
+							else:
+								gTimeDep[sigi][0]=g[sigi]
+								for i in range(1,ntau):
+									gTimeDep[sigi][i]=gTimeDep[sigi][i-1]@B[sigi][(taui+i)%ntau]
+						for oi in range(len(observablesTD)):
+							resTD[oi]+=observablesTD[oi](gTimeDep)
+			g=[ np.linalg.inv(B[sigi][(taui+1)%ntau])@g[sigi]@B[sigi][(taui+1)%ntau] for sigi in range(2)]
+			
+			# for sigi in range(2):
+			# 	U,D,V=np.linalg.svd(g[sigi])
+			# 	Up,Dp,Vp=np.linalg.svd(B[sigi][(taui+1)%ntau])
+			# 	g[sigi]=np.transpose(Vp)@(np.diag(1/Dp)@(np.transpose(Up)@U)@np.diag(D)@(V@Up)@np.diag(Dp))@Vp
+			if stabilize and (taui+1)%m==0:
+				gFromScratch=calcGFromScratch(Kexp,lamb,state,(taui+1)%ntau,deltaTau,mu,N,m,ntauOverm,B,stabilize)
+				for sigi in range(2):
+					errors=np.abs((g[sigi]-gFromScratch[sigi])/gFromScratch[sigi])
+					
+					maxError=np.mean(errors)
+					# print(np.array(gFromScratch[sigi]))
+					# print(np.array(g[sigi]))
+					
+					if maxError>stabEps:
+						print("WARNING: numerical instability, decrease m. Average relative error of size {e}".format(e=maxError))
+				g=gFromScratch
+				# TODO: warn "m too large" if propagated g differs too much from this
+		
 		if False:
 			for y in range(ny):
 				print(reduce(lambda a,b:a+b,('O' if state[0][x+nx*y]==-1 else '*' for x in range(nx))))
 			print()
-		
-		# if sweep%10==0:
-		#  	print([r/(sweep+1) for r in res])
-			
+
+	# print("Acceptance rate: {a}".format(a=accepted/attempts))
+
+	ret=([r/nMeasures for r in res],)
 	if len(observablesTD)!=0:
-		return ([r/nSweeps/ntau for r in res],[r/nSweeps/ntau for r in resTD])
+		ret=ret+([r/nMeasures for r in resTD],)
+	if profile:
+		ret=ret+(startMeasTime-startTime,time.clock()-startMeasTime)
+	if autoCorrN>0:
+		ret=ret+([a/autoCorrSamples-avCorrVal*avCorrVal/autoCorrSamples**2 for a in autoCorr],)
+	if returnState:
+		ret=ret+(state,)
+	return ret
+
+def optimizeRun(nx,ny,tx,ty,U,mu,beta,m,tausPerBeta,nWarmupSweeps,tdops,stabilize=True):
+	ntau=math.ceil(beta*tausPerBeta/m)*m
+
+	warmupMargin=3
+	autoCorrSamples=25
+	print("Measuring metropolis correlation length...")
+	_,autocorr,state=dqmc(nx,ny,tx,ty,U,mu,beta,ntau//m,m,0,nWarmupSweeps,
+		nWarmupSweeps*autoCorrSamples//warmupMargin,stabilize,[],autoCorrN=nWarmupSweeps//warmupMargin,returnState=True)
+	
+	autocorrNorm=np.array([np.mean(a) for a in autocorr])
+	autocorrNorm/=autocorrNorm[0]
+	c,lamb=np.linalg.lstsq([[1,-x] for x in range(len(autocorrNorm))], np.log(autocorrNorm),rcond=None)[0]
+	print("Metropolis correlation length: {l:.1f} sweeps".format(l=1/lamb))
+	
+	# import pylab as pl
+	# pl.plot(autocorrNorm)
+	# pl.plot([np.exp(c-lamb*x) for x in range(len(autocorrNorm))],linestyle="--")
+	# pl.show()
+	
+	if warmupMargin/lamb>nWarmupSweeps:
+		print("WARNING: Not long enough warmup ({a:.1f}<{m} correlation lengths)".format(a=nWarmupSweeps*lamb,m=warmupMargin))
 	else:
-		return [r/nSweeps/ntau for r in res]
+		print("Warmup sufficient ({a:.1f}>{m} correlation lengths)".format(a=nWarmupSweeps*lamb,m=warmupMargin))
+
+	nTimeMeasureSweeps=5
+	_,_,warmUpT,measT=dqmc(nx,ny,tx,ty,U,mu,beta,ntau//m,m,0,
+		nTimeMeasureSweeps,nTimeMeasureSweeps,stabilize,[],observablesTD=tdops,profile=True,startState=state)
+	
+	rm=(measT-warmUpT)/warmUpT
+	print("Time per update sweep: {t:.1f} ms".format(t=1e3*warmUpT/nTimeMeasureSweeps))
+	print("Time per update and measure sweep: {t:.1f} ms".format(t=1e3*measT/nTimeMeasureSweeps))
+
+	measurePeriod=1
+	var=math.inf
+	while True:
+		r=1/measurePeriod
+		v=(np.exp(lamb/r)+1)*(1+r*rm)/(np.exp(lamb/r)-1)/r
+		if v>var:
+			break
+			measurePeriod-=1
+		measurePeriod+=1
+		var=v
+	print("Optimal number of sweeps between measurements: {per}".format(per=measurePeriod))
+	return 1/lamb,measurePeriod
+
+def getG(nx,ny,tx,ty,U,mu,beta,m,tausPerBeta,nThreads,nWarmupSweeps,nSweepsPerThread,stabilize=True,nSamples=1):
+	
+	ntau=math.ceil(beta*tausPerBeta/m)*m
+	
+	def averageG(g):
+		ag=np.zeros((ntau,nx,ny))
+		for sigi in range(2):
+			for x in range(nx):
+				for y in range(ny):
+					for dx in range(nx):
+						for dy in range(ny):
+							ag[:,x,y]+=g[sigi][:,dx+dy*nx,(dx+x)%nx+((dy+y)%ny)*nx]
+		return ag/(2*nx*ny)
+	
+	_,measurePeriod=optimizeRun(nx,ny,tx,ty,U,mu,beta,m,tausPerBeta,nWarmupSweeps,[averageG],stabilize)
+
+	def work(seed,return_dict):
+		ret=dqmc(nx,ny,tx,ty,U,mu,beta,ntau//m,m,seed,nWarmupSweeps,nSweepsPerThread,
+			stabilize,[],observablesTD=[averageG],measurePeriod=measurePeriod)
+		return_dict[seed] = ret
+	
+	print("Running DQMC...")
+	if nThreads==1:
+		r=[]
+		for i in range(nSamples):
+			print("Progress {:2.1%}".format(i/nSamples), end="\r")
+			ret=dqmc(nx,ny,tx,ty,U,mu,beta,ntau//m,m,1+i,nWarmupSweeps,nSweepsPerThread,stabilize,
+				[],observablesTD=[averageG],measurePeriod=measurePeriod)
+			r.append(ret[1][0])
+		return np.mean(r,axis=0),np.std(r,axis=0)/np.sqrt(nSamples)
+	else:
+		manager = multiprocessing.Manager()
+		return_dict = manager.dict()
+		job=[multiprocessing.Process(target=work, args=(i,return_dict)) for i in range(nThreads)]
+		startTime=time.time()
+		print("Starting {n} jobs...".format(n=nThreads))
+		for t in job: t.start()
+		print("Waiting for {n} jobs...".format(n=nThreads))
+		for t in job: t.join()
+		print("Time per sweep: {time:.2f} ms".format(time=1000*(time.time()-startTime)/(nSweepsPerThread+nWarmupSweeps)/nThreads))
+		res=return_dict.values()
+		r=[res[t][1][0] for t in range(nThreads)]
+		return np.mean(r,axis=0),np.std(r,axis=0)/np.sqrt(nThreads)
+
 
 def main():
 	nx=2
 	ny=2
-	U=0
+	U=2
 	tx=1
 	ty=1
 	beta=2/tx #2/tx
@@ -120,8 +323,8 @@ def main():
 	ntau=(int(beta*tausPerBeta)//m)*m
 
 	nThreads=8
-	nWarmupSweeps=100
-	nSweepsPerThread=250
+	nWarmupSweeps=200
+	nSweepsPerThread=2500
 
 	# ops=[(lambda g:g[0]),(lambda g:g[1]),(lambda g:2-g[0][0,0]-g[1][0,0])]
 	opnames=["<n>","<nn>"]
@@ -145,8 +348,7 @@ def main():
 	ops=[averageG]
 	# ops=[lambda g:np.transpose(np.reshape(g[0][0,:],(ny,nx)))]
 
-	import multiprocessing
-	import time
+	
 	def work(seed,return_dict):
 		ret=dqmc(nx,ny,tx,ty,U,mu,beta,int(beta*tausPerBeta)//m,m,seed,nWarmupSweeps,nSweepsPerThread,[],observablesTD=ops)
 		return_dict[seed] = ret

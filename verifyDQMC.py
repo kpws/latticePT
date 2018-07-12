@@ -71,7 +71,7 @@ def main():
 	tx=1
 	ty=1*tx
 
-	U=0
+	U=2
 	beta=2 #2/tx
 	nUps=nx*ny//2
 	nDowns=nx*ny//2
@@ -107,7 +107,7 @@ def main():
 		psi=psis[psii]
 		w=weights[psii]
 		print(w)
-		if w<1e-5:
+		if w<1e-15:
 			break
 		E+=w*Es[psii]
 		nupndown+=w*inner(psi,cd(idown,c(idown,cd(iup,c(iup,psi )))))
