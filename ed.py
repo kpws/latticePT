@@ -2,7 +2,7 @@ import numpy as np
 from scipy import sparse
 from finite import HubbardH,c2i,c,cd,inner,addToFirst
 
-def getG(nx,ny,tx,ty,U,mu,beta,taus,eps=1e-4):
+def getG(nx,ny,tx,ty,tnw,tne,U,mu,beta,taus,eps=1e-4):
 	print("Generating basis...")
 	sys=(2,nx,ny)
 	import itertools
@@ -13,7 +13,7 @@ def getG(nx,ny,tx,ty,U,mu,beta,taus,eps=1e-4):
 
 	print("Filling Hamiltonian...")
 	for i in range(len(basis)):
-		res=HubbardH(nx,ny,U/2,tx,ty,U,{basis[i]:1})
+		res=HubbardH(nx,ny,U/2,tx,ty,tnw,tne,U,{basis[i]:1})
 		for k,v in res.items():
 			Hmat[i,index[k]]=v
 

@@ -159,7 +159,7 @@ def fac(n):
 def binom(a,b):
 	return fac(a)//fac(a-b)//fac(b)
 
-def HubbardH(nx,ny,mu,tx,ty,U,psi):
+def HubbardH(nx,ny,mu,tx,ty,tnw,tne,U,psi):
 	sys=[2,nx,ny]
 	newPsi={}
 	for pstate,pamp in psi.items():
@@ -182,9 +182,8 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 
 				for ialpha in range(2):
 					i0=c2i(sys,[ialpha,ix,iy])
-					ix1=c2i(sys,[ialpha,(ix+1)%nx,iy])
-					iy1=c2i(sys,[ialpha,ix,(iy+1)%ny])
 
+					ix1=c2i(sys,[ialpha,(ix+1)%nx,iy])
 					p2=p.c(i0).cd(ix1)
 					p2.amp*=-tx
 					addToMultiState(newPsi,p2)
@@ -192,11 +191,28 @@ def HubbardH(nx,ny,mu,tx,ty,U,psi):
 					p2.amp*=-tx
 					addToMultiState(newPsi,p2)
 					
+					iy1=c2i(sys,[ialpha,ix,(iy+1)%ny])
 					p2=p.c(i0).cd(iy1)
 					p2.amp*=-ty
 					addToMultiState(newPsi,p2)
 					p2=p.c(iy1).cd(i0)
 					p2.amp*=-ty
+					addToMultiState(newPsi,p2)
+
+					inw=c2i(sys,[ialpha,(ix+nx-1)%nx,(iy+1)%ny])
+					p2=p.c(i0).cd(inw)
+					p2.amp*=-tnw
+					addToMultiState(newPsi,p2)
+					p2=p.c(inw).cd(i0)
+					p2.amp*=-tnw
+					addToMultiState(newPsi,p2)
+
+					ine=c2i(sys,[ialpha,(ix+1)%nx,(iy+1)%ny])
+					p2=p.c(i0).cd(ine)
+					p2.amp*=-tne
+					addToMultiState(newPsi,p2)
+					p2=p.c(ine).cd(i0)
+					p2.amp*=-tne
 					addToMultiState(newPsi,p2)
 	return newPsi
 
