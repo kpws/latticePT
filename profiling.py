@@ -1,8 +1,8 @@
 import dqmc
 import math
 
-nx=16
-ny=16
+nx=36
+ny=36
 tx=1
 ty=.1
 tne=0
