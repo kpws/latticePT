@@ -9,79 +9,36 @@ from functools import reduce
 import multiprocessing
 import time
 
-def proj(x,u):
-    ## Can't hurt
-    u = unit_vec(u)
-    return np.dot(x,u) * u
-
-def unit_vec(x):
-    """Get unit vector of x. Same direction, norm==1"""
-    return x/np.linalg.norm(x)
-
-def modifiedGramSchmidt(vectors):
-    """ _correct_ recursive implementation of Gram Schmidt algo that is not subject to 
-    rounding erros that the original formulation is. 
-    Function signature and usage is the same as gramSchmidt()
-    """
-    ###### Ensure the input is a 2d array (or can be treated like one)
-    vectors = np.atleast_2d(vectors)
-
-    ###### Handle End Conditions
-    if len(vectors) == 0:
-        return []
-
-    ## Always just take unit vector of first vector for the start of the basis
-    u1 = unit_vec(vectors[0])
-
-    if len(vectors) == 1:
-        return u1
-
-    ###### Orthonormalize the rest of the vectors
-    #           | easy row stacking
-    #           |                                            | Get the orthagonal projection of each subsequent vector onto u1 (ensures whole space is now orthagonal to u1)                  
-    #                       | Recurse on the projections     |
-    basis = np.vstack( (u1, modifiedGramSchmidt( list(map(lambda v: v - proj(v,u1), vectors[1:])))) ) # not explicit list(map) conversion, need for python3+
-
-    return np.array(basis)
-
+DEBUG=False
 
 def mgs(M):
 	# return np.linalg.svd(M)
 	#modified gram-schmidt factorization
 	# Q - orthogonal, D - diagonal, R - unit upper triangular
 	Q,R=np.linalg.qr(M)
-	#Q=transpose(modifiedGramSchmidt(transpose(M)))
-	#R=transpose(Q)@M
-	
-	
-	
+
 	D=np.diagonal(R)
 	R=diag(1/D)@R
-	diff=np.max(np.abs(Q@diag(D)@R-M))/np.mean(np.abs(M))
-	if diff>1e-10:
-		print("QR issue1: "+str(diff))
 
-	diff=np.max(np.abs(Q@transpose(Q)-np.eye(len(M)) ))/np.mean(np.abs(Q))
-	if diff>1e-10:
-		print("QR issue2: "+str(diff))
+	if DEBUG:
+		diff=np.max(np.abs(Q@diag(D)@R-M))/np.mean(np.abs(M))
+		if diff>1e-10:
+			print("QR issue1: "+str(diff))
+
+		diff=np.max(np.abs(Q@transpose(Q)-np.eye(len(M)) ))/np.mean(np.abs(Q))
+		if diff>1e-10:
+			print("QR issue2: "+str(diff))
 	return Q,D,R
 
-# K D1 K D2 K D3
-# K=U D Uinv
-
-
 def triInv(A):
-	# return transpose(A)
 	ret=scipy.linalg.solve_triangular(A, np.identity(A.shape[0]),unit_diagonal=True)
-	diff=np.max(np.abs(A@ret-np.eye(len(A))))/np.mean(np.abs(A))
-	if diff>1e-9:
-		print("inv issue: "+str(diff))
+	if DEBUG:
+		diff=np.max(np.abs(A@ret-np.eye(len(A))))/np.mean(np.abs(A))
+		if diff>1e-9:
+			print("inv issue: "+str(diff))
 	return ret
-	# return scipy.linalg.inv(A)
 
 def calcB(Kexp,lamb,deltaTau,state,mu):
-	# w,v=np.linalg.eig(Kexp@diag([np.exp( lamb*1*s + deltaTau*mu ) for s in state]))
-	# print(w)
 	return [Kexp@diag([np.exp( lamb*sig*s + deltaTau*mu ) for s in state])  for sig in [-1,1]]
 
 def calciB(iKexp,lamb,deltaTau,state,mu):
@@ -92,134 +49,49 @@ def calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau):
 
 def calciBs(iKexp,lamb,deltaTau,state,mu,N,ntau):
 	return [[diag([np.exp( -lamb*sig*state[li][i] - deltaTau*mu ) for i in range(N)])@iKexp for li in range(ntau)] for sig in [-1,1]]
+
+def getNTau(beta, nTauPerBeta, m):
+	minN=math.ceil(beta*nTauPerBeta)
+	nTau=m
+	while nTau<minN: nTau*=2
+	return nTau
+
+# def updateBtree(tree,m,taui,newB):
+# 	Bs=tree[0]
+# 	Bs[taui]=newB
+# 	for i in range(1,len(tree)):
+# 		tree[i][taui//2**i]=BTree[1]
+
+# def getBProd(Btree,start,end): #not including end
+	
 #Z. Bai et al. / Linear Algebra and its Applications 435 (2011) 659–673
-def calcGFromScratch(Kexp,lamb,state,taui,deltaTau,mu,N,m,ntauOverm,B,stabilize,special=False,Bi=None,precursor=False):
+def calcGFromScratch(Kexp,lamb,state,taui,deltaTau,mu,N,m,ntauOverm,B,stabilize=True,useSVD=True):
 	ntau=m*ntauOverm
-	if special:
-		mB=[[reduce(lambda a,b:a@b,(Bi[sig][(taui+j*m+(ntau-1-i)+1)%ntau] for i in range(m))) for j in range(ntauOverm)] for sig in range(2)]
-		# print("eig:")
-		# print(np.linalg.eig(mB[0][0]))
-		ret=[0,0]
-		for sigi in range(2):
-			# U,D,V=np.linalg.svd(mB[sigi][-1])
-			U,D,V=mgs(mB[sigi][-1])
-			for i in range(len(mB[sigi])-2,-1,-1):
-				M=(mB[sigi][i]@U)@diag(D)
-				# U,D,Vp=np.linalg.svd(M)
-				U,D,Vp=mgs(M)
-				V=Vp@V
-			
-			M=U@diag(D)@V
-			v,w=np.linalg.eig(M)
-			print("id:")
-			print(D)
-			print(v)
-			# print(np.real(w@np.diag(v)@np.linalg.inv(w)))
-			print(M@np.linalg.inv((np.eye(len(M))+M)))
-			ret[sigi]=np.real(w@np.diag(v/(1+v))@np.linalg.inv(w))
-			print(ret[sigi])
-
-
-		ntauE=1
-		while 2**ntauE!=ntau:
-			ntauE+=1
-		ret=[]
-		for sigi in range(2):
-			# old=[mgs(B[sigi][(taui+i+1)%ntau]) for i in range(ntau)]
-			old=[mgs(np.linalg.inv(B[sigi][(taui+(ntau-i-1)+1)%ntau])) for i in range(ntau)]
-			
-			for l in range(ntauE):
-				new=[]
-				for i in range(len(old)//2):
-					U1,D1,V1=old[2*i]
-					U2,D2,V2=old[2*i+1]
-					U,D,V=mgs(diag(D1)@(V1@U2)@diag(D2))
-					V=V@V2
-					U=U1@U
-					new.append((U,D,V))
-				old=new
-			# U,D,V=new[0]
-			# Vi=triInv(V)
-			# Up,Dp,Vp=mgs(transpose(U)@Vi+diag(D))
-			# print("min: {min}, max: {max}".format(min=min(np.abs(Dp)),max=max(np.abs(Dp))))
-			# ret.append(triInv(Vp@V)@diag(1/Dp)@(transpose(Up)@transpose(U)))
-
-			# U,D,V=new[0]
-			# Vi=triInv(V)
-			# Up,Dp,Vp=mgs(transpose(U)@Vi+diag(D))
-			# print("min: {min}, max: {max}".format(min=min(np.abs(D)),max=max(np.abs(D))))
-			# ret.append(triInv(Vp@V)@diag(1/Dp)@(transpose(Up)@diag(D)@transpose(V)))
-			M=new[0][0]@diag(new[0][1])@new[0][2]
-			v,w=np.linalg.eig(M)
-			# print(w@np.diag(v)@np.linalg.inv(w)/M)
-			# print(np.diag(v/(1+v)))
-			# print("eigs: "+str(v))
-			# print("orig:")
-			# print(new[0][0]@diag(new[0][1])@new[0][2])
-			# print("PDPi:")
-			# print(w@np.diag(v/(1+v))@np.linalg.inv(w))
-			# print(v/(1+v))
-			ret.append(np.real(w@np.diag(v/(1+v))@np.linalg.inv(w)))
-			# ret.append(np.linalg.inv(np.eye(len(U))+U@diag(D)@V))
-		return ret
-
 	if stabilize:
 		mB=[[reduce(lambda a,b:a@b,(B[sig][(taui+j*m+i+1)%ntau] for i in range(m))) for j in range(ntauOverm)] for sig in range(2)]
-
 		ret=[0,0]
-		pre=[0,0]
-		useSVD=True
 		for sigi in range(2):
-			# U,D,V=np.linalg.svd(mB[sigi][-1])
-			U,D,V=mgs(mB[sigi][-1])
-			for i in range(len(mB[sigi])-2,-1,-1):
-				M=(mB[sigi][i]@U)@diag(D)
-				# U,D,Vp=np.linalg.svd(M)
+			for i in range(len(mB[sigi])-1,-1,-1):
+				if i==len(mB[sigi])-1:
+					M=mB[sigi][-1]
+				else:
+					M=(mB[sigi][i]@U)@diag(D)
 				if useSVD:
-					U,D,Vp=scipy.linalg.svd(M,lapack_driver='gesvd') #default gesdd is not accurate enough, mgs is even better..
+					U,D,Vp=scipy.linalg.svd(M,lapack_driver='gesvd',overwrite_a=True) #default gesdd is not accurate enough, mgs is even better..
 				else:
 					U,D,Vp=mgs(M)
-				# print("Check:")
-				# print(min(np.abs(D)))
-				# print(max(D))
-				# print(np.max(np.abs(U@diag(D)@Vp-M)))
-				V=Vp@V
-			# Ml[sigi]=U@diag(D)@V
-			# Up,Dp,Vp=np.linalg.svd(transpose(U)@triInv(V)+diag(D))
+				if i!=len(mB[sigi])-1:
+					V=Vp@V
+				else:
+					V=Vp
 			Ds=[d if abs(d)<1 else 1 for d in D]
 			Dbi=[1/d if abs(d)>1 else 1 for d in D]
-			
-			# print(np.linalg.svd(V)[1])
-			# Up,Dp,Vp=mgs(diag(Dbi)@transpose(U)+diag(Ds)@V)
-			# Up,Dp,Vp=np.linalg.svd(diag(Dbi)@transpose(U)+diag(Ds)@V)
-			# ret[sigi]=triInv(Vp)@diag(1/Dp)@transpose(Up)@diag(Dbi)@transpose(U)
-			# print(np.linalg.svd(diag(Dbi)@transpose(U)+diag(Ds)@V)[1])
-
-			# ret[sigi]=np.linalg.inv(diag(Dbi)@transpose(U)+diag(Ds)@V)@(diag(Dbi)@transpose(U))
 			H=diag(Dbi)@transpose(U)+diag(Ds)@V
-			# print(np.linalg.svd(H)[1])
-			# print(V)
 			LU,P=scipy.linalg.lu_factor(H)
-			# ret[sigi]=np.linalg.solve(H, diag(Dbi)@transpose(U))
-			ret[sigi]=scipy.linalg.lu_solve((LU, P), diag(Dbi)@transpose(U))
-			pre[sigi]=(H,Dbi,transpose(U))
-			# ret[sigi]=transpose(Vp)@(diag(1/Dp)@transpose(Up)@diag(Dbi))@transpose(U)
 
-			# Up,Dp,Vp=mgs(transpose(U)@triInv(V)+diag(D))
-			# print("Dp:"+str(D))
-			# ret[sigi]=(triInv(V)@triInv(Vp))@diag(1/Dp)@(transpose(Up)@transpose(U))
-			# ret[sigi]=(triInv(Vp@V))@diag(1/Dp)@(transpose(Up)@transpose(U))
-		# for mb in mB:
-			# U,D,V=numpy.linalg.svd(mb)
-		
-		# Ml=[mB[sigi][0] for sigi in range(2)]
-		# for il in range(1,ntauOverm):
-		# 	for sigi in range(2):
-		# 		Ml[sigi]=Ml[sigi] @ mB[sigi][il]
-		if precursor:
-			return ret,pre
-		else:
-			return ret
+			ret[sigi]=scipy.linalg.lu_solve((LU, P), diag(Dbi)@transpose(U))
+
+		return ret
 	else:
 		Ml=[B[sigi][(taui+1)%ntau] for sigi in range(2)]
 		for il in range(1,ntau):
@@ -285,11 +157,6 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 	Kexp=scipy.linalg.expm(-deltaTau*K)
 	iKexp=scipy.linalg.expm(deltaTau*K)
 	
-	# w,v=np.linalg.eig(Kexp)
-	# print(w)
-	# _,D,_=np.linalg.svd(Kexp)
-	# print(D)
-
 	if startState==None:
 		state=[np.array([rand.choice([-1,1]) for i in range(N)]) for tau in range(ntau)]
 	else:
@@ -300,7 +167,7 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 
 	B=calcBs(Kexp,lamb,deltaTau,state,mu,N,ntau)
 	iB=calciBs(iKexp,lamb,deltaTau,state,mu,N,ntau)
-	g=calcGFromScratch(Kexp,lamb,state,0,deltaTau,mu,N,m,ntauOverm,B,stabilize)
+	g=calcGFromScratch(Kexp,lamb,state,ntau-1,deltaTau,mu,N,m,ntauOverm,B)
 	attempts=0
 	accepted=0
 	nMeasures=0
@@ -309,20 +176,30 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 	gTimeDep=np.zeros((2,ntau,nx*ny,nx*ny))
 	g2TimeDep=np.zeros((2,ntau,ntau,nx*ny,nx*ny))
 	if profile: startTime=time.clock()
+
 	for sweep in range(nWarmupSweeps+nSweeps):
-		if seed==0:
-			print("Progress {:2.1%}".format(sweep/(nWarmupSweeps+nSweeps)), end="\r")
-		
-		for taui in range(ntau):
+		Brights=[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) for sigi in range(2)]
+		Bleft=[[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) ] for sigi in range(2)]
+		# mB=[[reduce(lambda a,b:a@b,(B[sigi][(j*m+i+1)%ntau] for i in range(m))) for sigi in range(2)] for j in range(ntauOverm)]
+		mB=[[reduce(lambda a,b:a@b,(B[sigi][(j*m+i)%ntau] for i in range(m))) for sigi in range(2)] for j in range(ntauOverm)]
+		for sigi in range(2):
+			for i in range(1,ntau//m+1):
+				n,U,D,V=Bleft[sigi][i-1]
+				Up,Dp,Vp=scipy.linalg.svd(diag(D)@(V@mB[i-1][sigi]),lapack_driver='gesvd',overwrite_a=True)
+				Up=U@Up
+				Bleft[sigi].append((n+[((i-1)*m+ii)%ntau for ii in range(m)],Up,Dp,Vp))
+		for taui in range(ntau-1,-1,-1):
+			if seed==0:
+				print("Progress {:2.1%}".format((sweep*ntau+(ntau-1-taui))/ntau/(nWarmupSweeps+nSweeps)), end="\r")
 			for u in range(nx*ny):
 				# x=rand.randrange(nx)
 				# y=rand.randrange(ny)
 				# ii=x+nx*y
-				ii=u
+				ii=u%(nx*ny)
 				delta=[np.exp(-2*sigs[sigi]*lamb*state[taui][ii])-1 for sigi in range(2)]
 				R=[1+(1-g[sigi][ii,ii])*delta[sigi] for sigi in range(2)]
 				Rprod=R[0]*R[1]
-				ps=Rprod/(1+Rprod) #heatbath
+				ps=Rprod/(1+Rprod) #heatbath, alt: ps=Rprod
 				sign+=np.sign(ps)
 				p=abs(ps)
 				attempts+=1
@@ -330,19 +207,17 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 					accepted+=1
 					state[taui][ii]*=-1
 					for sigi in range(2):
-						# print("g")
-						# print(g[sigi])
-						# print("dg")
-						# print(np.outer([1 if ii==i else 0 for i in range(N)]-g[sigi][::,ii],g[sigi][ii,::]*(delta[sigi]/R[sigi])))
 						g[sigi]-=np.outer([1 if ii==i else 0 for i in range(N)]-g[sigi][::,ii],g[sigi][ii,::]*(delta[sigi]/R[sigi]))
 			
 			tB=calcB(Kexp,lamb,deltaTau,state[taui],mu)
 			for sigi in range(2):
 				B[sigi][taui]=tB[sigi]
+			
 			tiB=calciB(iKexp,lamb,deltaTau,state[taui],mu)
 			for sigi in range(2):
 				iB[sigi][taui]=tiB[sigi]
 
+			# measure ?
 			if sweep>=nWarmupSweeps:
 				if autoCorrN>0:
 					corrVal=np.array(state)
@@ -355,7 +230,7 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 							autoCorr[i]+=corrVal*old[i]
 				if profile and taui==0 and sweep==nWarmupSweeps:
 						startMeasTime=time.clock()
-				if (sweep-nWarmupSweeps)%measurePeriod==0:
+				if (sweep-nWarmupSweeps+1)%measurePeriod==0:
 					nMeasures+=1
 					for oi in range(len(observables)):
 						res[oi]+=observables[oi](g)
@@ -388,50 +263,49 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 									gTimeDep[sigi][i]=gTimeDep[sigi][i-1]@B[sigi][(taui+i)%ntau]
 						for oi in range(len(observablesTD)):
 							resTD[oi]+=observablesTD[oi](gTimeDep)
-			# print(np.linalg.inv(B[sigi][(taui+1)%ntau])-iB[sigi][(taui+1)%ntau])
-			# gFromScratch=calcGFromScratch(Kexp,lamb,state,(taui)%ntau,deltaTau,mu,N,m,ntauOverm,B,stabilize,special=False)
-			# mean=np.mean(np.abs(gFromScratch[sigi]))
-			# errors=np.abs(g[sigi]-gFromScratch[sigi])/mean
-			
-			# maxError=np.max(errors)
-			# # print(gFromScratch[sigi]/g[sigi])
-			# # print(np.array(g[sigi]))
-			
-			# if maxError>stabEps:
-			# 	print("WARNING1: numerical instability, decrease m. Max relative error of size {e}".format(e=maxError))
-			# g=gFromScratch
-			
-			# gFromScratch,HB=calcGFromScratch(Kexp,lamb,state,(taui)%ntau,deltaTau,mu,N,m,ntauOverm,B,stabilize,special=False,Bi=iB,precursor=True)
-			# for sigi in range(2):
-			# 	mean=np.mean(np.abs(gFromScratch[sigi]))
-			# 	errors=np.abs(g[sigi]-gFromScratch[sigi])/mean
-			
-			# 	maxError=np.max(errors)
-		
-			
-			# 	if maxError>stabEps:
-			# 		print("WARNING: g from updates numerical instability. Max relative error of size {e}".format(e=maxError))
 
-			# g=gFromScratch
+			#prepare for next slice
 
-			g=[ iB[sigi][(taui+1)%ntau]@g[sigi]@B[sigi][(taui+1)%ntau] for sigi in range(2)]	
-			# g=[ iB[sigi][(taui+1)%ntau]@np.linalg.solve( HB[sigi][0], diag(HB[sigi][1])@(HB[sigi][2]@B[sigi][(taui+1)%ntau])  ) for sigi in range(2)]
-		
-			if stabilize and (taui+1)%m==0:
-
-				gFromScratch=calcGFromScratch(Kexp,lamb,state,(taui+1)%ntau,deltaTau,mu,N,m,ntauOverm,B,stabilize,special=False,Bi=iB)
+			# g=[ iB[sigi][(taui+1)%ntau]@g[sigi]@B[sigi][(taui+1)%ntau] for sigi in range(2)] #tau->tau+1
+			g=[ B[sigi][taui]@g[sigi]@iB[sigi][taui] for sigi in range(2)] #tau->tau-1
+			
+			if stabilize and (taui)%m==0:
+				gFromScratch=[0,0]
 				for sigi in range(2):
+					mB=reduce(lambda a,b:a@b,(B[sigi][(taui+i)%ntau] for i in range(m)))
+					n,U,D,V=Brights[sigi]
+					Up,Dp,Vp=scipy.linalg.svd((mB@U)@diag(D),lapack_driver='gesvd',overwrite_a=True)
+					Brights[sigi]=([(taui+i)%ntau for i in range(m)]+n,Up,Dp,Vp@V)
+
+					nl,Uleft,Dleft,Vleft=Brights[sigi]
+					nr,Uright,Dright,Vright=Bleft[sigi][(taui+1)//m]
+					# print()
+					# print("next taui: {i}".format(i=(taui-1)%ntau))
+					# print("nl={nl}, nr={nr}".format(nl=nl,nr=nr))
+					# print("{nl}, {nr}".format(nl=nl,nr=nr))
+					# print(Uright@diag(Dright)@Vright@Uleft@diag(Dleft)@Vleft)
+
+					Dlefts=[d if abs(d)<1 else 1 for d in Dleft]
+					Dleftbi=[1/d if abs(d)>1 else 1 for d in Dleft]
+					Drights=[d if abs(d)<1 else 1 for d in Dright]
+					Drightbi=[1/d if abs(d)>1 else 1 for d in Dright]
+
+					M=diag(Dleftbi)@(transpose(Uleft)@transpose(Vright))@diag(Drightbi)+diag(Dlefts)@(Vleft@Uright)@diag(Drights)
+					LU,P=scipy.linalg.lu_factor(M)
+
+					# gFromScratch[sigi]=transpose(Vright)@(diag(Drightbi)@scipy.linalg.lu_solve((LU, P), diag(Dleftbi)@transpose(Uleft)))
+					gFromScratch[sigi]=transpose(Vright)@(diag(Drightbi)@scipy.linalg.lu_solve((LU, P), np.eye(nx*ny))@diag(Dleftbi))@transpose(Uleft)
+					# gFromScratch[sigi]=np.linalg.inv(1+Uleft@(diag(Dleft)@(Vleft@Uright)@diag(Dright))@Vright)
+					# gFromScratch=calcGFromScratch(Kexp,lamb,state,(taui+1)%ntau,deltaTau,mu,N,m,ntauOverm,B)
+					
 					mean=np.mean(np.abs(gFromScratch[sigi]))
-					errors=np.abs(g[sigi]-gFromScratch[sigi])/mean
-					
-					maxError=np.max(errors)
-					# print(np.array(g[sigi]))
-					
+					maxError=np.max(np.abs(g[sigi]-gFromScratch[sigi])/mean)
 					if maxError>stabEps:
-						print("WARNING3: numerical instability, decrease m. Max relative error of size {e}".format(e=maxError))
-					#print(mean)
+						print("WARNING3: numerical instability, decrease m. Max relative error of size {e:.3e}".format(e=maxError))
+
 				g=gFromScratch
-				# TODO: warn "m too large" if propagated g differs too much from this
+
+		#measure more
 		if (sweep-nWarmupSweeps)%measurePeriod==0 and saveSamples!=None:
 			for taui in range(0,ntau):
 				for i in range(0,ntau):
@@ -444,6 +318,9 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 						g2TimeDep[sigi,taui,i]=(transpose(Vr)@transpose(Vp))@diag(1/Dp)@(transpose(Up)@Vl)
 			saveSamples(sweep, np.sign(ps), g2TimeDep)
 		if False:
+			for y in range(ny):
+				print(reduce(lambda a,b:a+b,('O' if state[0][x+nx*y]==-1 else '*' for x in range(nx))))
+			print()
 			for y in range(ntau):
 				print(reduce(lambda a,b:a+b,('O' if state[y][x+nx*0]==-1 else '*' for x in range(nx))))
 			print()
