@@ -19,8 +19,8 @@ nTau=math.ceil(beta*tausPerBeta/m)*m
 seed=0
 nSamples=3
 
-g,warmup,total=dqmc.dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,nTau//m,m,seed,nSamples,0,True,
-	[],observablesTD=[],stabEps=1e-4,autoCorrN=0,profile=True,returnState=False,startState=None,measurePeriod=100,saveSamples=None)
+g,warmup,total=dqmc.dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,nTau//m,m,seed,0,True,
+	[],observablesTD=[],stabEps=1e-4,autoCorrN=0,profile=True,returnState=False,startState=None,measurePeriod=100,saveSamples=None,nWarmupSweeps=nSamples)
 print("Time {t:.1f} ms".format(t=warmup*1000/nSamples))
 
 #Time 13987.3 ms

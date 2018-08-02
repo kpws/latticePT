@@ -51,11 +51,26 @@ def calciBs(iKexp,lamb,deltaTau,state,mu,N,ntau):
 	return [[diag([np.exp( -lamb*sig*state[li][i] - deltaTau*mu ) for i in range(N)])@iKexp for li in range(ntau)] for sig in [-1,1]]
 
 def getNTau(beta, nTauPerBeta, m):
-	minN=math.ceil(beta*nTauPerBeta)
-	nTau=m
-	while nTau<minN: nTau*=2
-	return nTau
+	minN=math.ceil(beta*nTauPerBeta/m)*m
+	# nTau=m
+	# while nTau<minN: nTau*=2
+	return minN
 
+def symmetrizeG(g,nTau,nx,ny):
+	gsym=np.zeros((nTau,nx*ny))
+	for tau in range(nTau):
+		for dtau in range(nTau):
+			for x in range(nx):
+				for y in range(ny):
+					for dx in range(nx):
+						for dy in range(ny):
+							for sigi in range(2):
+								i1=x+nx*y
+								i2=(x+dx)%nx+nx*((y+dy)%ny)
+								i3=dx+nx*dy
+								gsym[dtau,i3]+=g[sigi,tau,(tau+dtau)%nTau,i1,i2]
+								# gsym[:,i3]+=np.roll(g[sigi,tau,:,i1,i2],tau)
+	return gsym/(2*nTau*nx*nx)
 # def updateBtree(tree,m,taui,newB):
 # 	Bs=tree[0]
 # 	Bs[taui]=newB
@@ -116,9 +131,11 @@ def stableProd(Bs,N,m):
 		V=Vp@V
 	return U,D,V
 
+def splitDiag(D):
+	return [d if abs(d)<1 else 1 for d in D],[1/d if abs(d)>1 else 1 for d in D]
 
-def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,stabilize,
-	observables,observablesTD=[],stabEps=1e-4,autoCorrN=0,profile=False,returnState=False,startState=None,measurePeriod=1,saveSamples=None):
+def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nSweeps,stabilize,
+	observables,observablesTD=[],stabEps=1e-4,autoCorrN=0,profile=False,returnState=False,startState=None,measurePeriod=1,saveSamples=None,nWarmupSweeps=0,showProgress=True,progressStart=0,progressFinish=1):
 	rand=random.Random()
 	rand.seed(seed)
 
@@ -174,14 +191,16 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 	sign=0
 	
 	gTimeDep=np.zeros((2,ntau,nx*ny,nx*ny))
-	g2TimeDep=np.zeros((2,ntau,ntau,nx*ny,nx*ny))
+	
 	if profile: startTime=time.clock()
 
 	for sweep in range(nWarmupSweeps+nSweeps):
-		Brights=[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) for sigi in range(2)]
-		Bleft=[[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) ] for sigi in range(2)]
+		
 		# mB=[[reduce(lambda a,b:a@b,(B[sigi][(j*m+i+1)%ntau] for i in range(m))) for sigi in range(2)] for j in range(ntauOverm)]
 		mB=[[reduce(lambda a,b:a@b,(B[sigi][(j*m+i)%ntau] for i in range(m))) for sigi in range(2)] for j in range(ntauOverm)]
+
+		Brights=[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) for sigi in range(2)]
+		Bleft=[[([],np.eye(nx*ny),[1 for i in range(nx*ny)],np.eye(nx*ny)) ] for sigi in range(2)]
 		for sigi in range(2):
 			for i in range(1,ntau//m+1):
 				n,U,D,V=Bleft[sigi][i-1]
@@ -189,8 +208,8 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 				Up=U@Up
 				Bleft[sigi].append((n+[((i-1)*m+ii)%ntau for ii in range(m)],Up,Dp,Vp))
 		for taui in range(ntau-1,-1,-1):
-			if seed==0:
-				print("Progress {:2.1%}".format((sweep*ntau+(ntau-1-taui))/ntau/(nWarmupSweeps+nSweeps)), end="\r")
+			if showProgress:
+				print("Progress {:2.1%}".format(progressStart+(progressFinish-progressStart)*(sweep*ntau+(ntau-1-taui))/ntau/(nWarmupSweeps+nSweeps)), end="\r")
 			for u in range(nx*ny):
 				# x=rand.randrange(nx)
 				# y=rand.randrange(ny)
@@ -285,10 +304,8 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 					# print("{nl}, {nr}".format(nl=nl,nr=nr))
 					# print(Uright@diag(Dright)@Vright@Uleft@diag(Dleft)@Vleft)
 
-					Dlefts=[d if abs(d)<1 else 1 for d in Dleft]
-					Dleftbi=[1/d if abs(d)>1 else 1 for d in Dleft]
-					Drights=[d if abs(d)<1 else 1 for d in Dright]
-					Drightbi=[1/d if abs(d)>1 else 1 for d in Dright]
+					Dlefts,Dleftbi=splitDiag(Dleft)
+					Drights,Drightbi=splitDiag(Dright)
 
 					M=diag(Dleftbi)@(transpose(Uleft)@transpose(Vright))@diag(Drightbi)+diag(Dlefts)@(Vleft@Uright)@diag(Drights)
 					LU,P=scipy.linalg.lu_factor(M)
@@ -306,17 +323,58 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nWarmupSweeps,nSweeps,st
 				g=gFromScratch
 
 		#measure more
-		if (sweep-nWarmupSweeps)%measurePeriod==0 and saveSamples!=None:
-			for taui in range(0,ntau):
-				for i in range(0,ntau):
-					if i==0:
-						g2TimeDep[sigi,taui,i]=g[sigi]
+		if sweep%measurePeriod==0 and saveSamples!=None:
+			# mB=[[reduce(lambda a,b:a@b,(B[sigi][(j*m+i)%ntau] for i in range(m))) for sigi in range(2)] for j in range(ntauOverm)]
+			# mBprods=[mB]
+			# for l in range(ntau/m-1):
+			# 	mBprods.append([])
+			# 	for taui in range(ntau/m):
+			# 		mBprods[-1].append([])
+			# 		for sigi in range(2):
+			# 			U,D,V=mBprods[l]
+			# 			Up,Dp,Vp=scipy.linalg.svd(diag(D)@(V@mB[taui+l*m+1][sigi]),lapack_driver='gesvd',overwrite_a=True)
+			# 			mBprods[-1].append((U@Up,Dp,Vp))
+			
+			Bprods=[]
+			for l in range(0,ntau+1):
+				Bprods.append([])
+				for taui in range(ntau):
+					if l==0:
+						Bprods[l].append([scipy.linalg.svd(np.eye(nx*ny),lapack_driver='gesvd',overwrite_a=True) for sigi in range(2)])
 					else:
-						Ul,Dl,Vl=stableProd([B[sigi][(taui+i-j)%ntau] for j in range(i)],N,m)
-						Ur,Dr,Vr=stableProd([B[sigi][(taui+ntau-j)%ntau] for j in range(ntau-i)],N,m)
-						Up,Dp,Vp=np.linalg.svd(diag(1/Dl)@(transpose(Ul)@transpose(Vr))+(Vl@Ur)@diag(Dr))
-						g2TimeDep[sigi,taui,i]=(transpose(Vr)@transpose(Vp))@diag(1/Dp)@(transpose(Up)@Vl)
+						Bprod=[]
+						for sigi in range(2):
+							U,D,V=Bprods[l-1][taui][sigi]
+							Up,Dp,Vp=scipy.linalg.svd(diag(D)@(V@B[sigi][(taui-l)%ntau]),lapack_driver='gesvd',overwrite_a=True)
+							Bprod.append((U@Up,Dp,Vp))
+						Bprods[l].append(Bprod)
+			# Ul,Dl,Vl=Bprods[3][7][0]
+			# Ur,Dr,Vr=Bprods[2][4][0]
+			# print(Ul@diag(Dl)@Vl@Ur@diag(Dr)@Vr)
+			# Ul,Dl,Vl=Bprods[5][7][0]
+			# print(Ul@diag(Dl)@Vl)
+			g2TimeDep=np.zeros((2,ntau,ntau,nx*ny,nx*ny))
+			for taui in range(ntau):
+				for i in range(ntau):
+					for sigi in range(2):
+						# Ul,Dl,Vl=stableProd([B[sigi][(taui+i-j)%ntau] for j in range(i)],N,m)
+						Ul,Dl,Vl=Bprods[i][(taui+i)%ntau][sigi]
+						# Ur,Dr,Vr=stableProd([B[sigi][(taui+ntau-j)%ntau] for j in range(ntau-i)],N,m)
+						Ur,Dr,Vr=Bprods[ntau-i][taui][sigi]
+						Dls,Dlbi=splitDiag(Dl)
+						Drs,Drbi=splitDiag(Dr)
+
+						M=diag(Dlbi)@transpose(Ul)@transpose(Vr)@diag(Drbi)+diag(Dls)@Vl@Ur@diag(Drs)
+
+						LU,P=scipy.linalg.lu_factor(M)
+
+						g2TimeDep[sigi][taui][(taui+i)%ntau]=transpose(Vr)@(diag(Drbi)@scipy.linalg.lu_solve((LU, P), np.eye(nx*ny))@diag(Dls))@Vl
+						# Up,Dp,Vp=scipy.linalg.svd(diag(1/Dl)@(transpose(Ul)@transpose(Vr))+(Vl@Ur)@diag(Dr),lapack_driver='gesvd',overwrite_a=True)
+						# g2TimeDep[sigi,taui,i]=(transpose(Vr)@transpose(Vp))@diag(1/Dp)@(transpose(Up)@Vl)
+						#TODO: split
+			
 			saveSamples(sweep, np.sign(ps), g2TimeDep)
+
 		if False:
 			for y in range(ny):
 				print(reduce(lambda a,b:a+b,('O' if state[0][x+nx*y]==-1 else '*' for x in range(nx))))
@@ -389,15 +447,17 @@ def optimizeRun(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nWarmupSweeps,tdops,
 	print("Optimal number of sweeps between measurements: {per}".format(per=measurePeriod))
 	return 1/lamb,measurePeriod
 
-def getDirName(nx,ny,nTau,tx,ty,tnw,tne,U,mu,beta,m,measurePeriod):
+def getDirName(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
 	return ("samples/nx={nx},ny={ny},ntau={nTau},tx={tx},tx={ty},tnw={tnw},"+
-			"tne={tne},U={U},mu={mu},beta={beta},m={m},period={measurePeriod}").format(
-				nx=nx,ny=ny,nTau=nTau,tx=tx,ty=ty,tnw=tnw,tne=tne,U=U,mu=mu,beta=beta,m=m,measurePeriod=measurePeriod)
+			"tne={tne},U={U},mu={mu},beta={beta},m={m}").format(
+				nx=nx,ny=ny,nTau=nTau,tx=tx,ty=ty,tnw=tnw,tne=tne,U=U,mu=mu,beta=beta,m=m)
 
-def genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nSweepsPerRun,measurePeriod,nRuns=1,nThreads=1,startSeed=0):
-	ntau=math.ceil(beta*tausPerBeta/m)*m
+def genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nSamplesPerRun,measurePeriod=-1,nRuns=1,nThreads=1,startSeed=0):
+	ntau=getNTau(beta, tausPerBeta, m)
+	if measurePeriod==-1:
+		measurePeriod=ntau #ensures similar complexity for measurements and updates
 
-	dirname=getDirName(nx,ny,ntau,tx,ty,tnw,tne,U,mu,beta,m,measurePeriod)
+	dirname=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
 
 	import os
 	if not os.path.exists(dirname):
@@ -415,39 +475,38 @@ def genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nSweepsPerRun,measur
 		if os.path.exists(file):
 			print("ERROR: run already exists, "+file)
 		else:
-			dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntau//m,m,seed,0,nSweepsPerRun,True,
-				[],measurePeriod=measurePeriod,saveSamples=save)
-			np.savez_compressed(file, sweeps=sweeps, sgns=sgns, gs=gs)
+			dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntau//m,m,seed,(nSamplesPerRun-1)*measurePeriod+1,True,
+				[],measurePeriod=measurePeriod,saveSamples=save,progressStart=run/nRuns,progressFinish=(run+1)/nRuns)
+			np.savez_compressed(file, sweeps=np.array(sweeps), sgns=np.array(sgns), gs=np.array(gs))
 
-def loadRuns(nx,ny,ntau,tx,ty,tnw,tne,U,mu,beta,m,measurePeriod):
+def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
 	import os
 	from os.path import isfile, join
-	path=getDirName(nx,ny,ntau,tx,ty,tnw,tne,U,mu,beta,m,measurePeriod)
+	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
 	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
 	print("Found {n} previous runs.".format(n=len(files)))
 	runs=[]
 	for f in files:
 		loaded = np.load(os.path.join(path, f))
-		runs.append((loaded['sweeps'],loaded['sgns'],loaded['gs']))
+		runs.append(list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs'])))
 
 	return runs
 
-def averageOverG(runs,op):
+def getAutocorrelator(run, length):
+	assert(0<len(run)-length)
+	return [sum(run[i][2]*run[i+l][2] for i in range(len(run)-length))/(len(run)-length) for l in range(length)]
+
+def averageOverG(runs,op,warmUp):
 	opRes=[]
-	sgnRes=[]
-	for run in runs:
+	for i in range(len(runs)):
 		opAcc=0
 		sgnAcc=0
-		for g in run[2]:
-			opAcc+=op(g)
-		for sign in run[1]:
-			sgnAcc+=sign
-		opRes.append(opAcc/len(run))
-		sgnRes.append(sgnAcc/len(run))
-	opVar=np.std(opRes,axis=0)**2/len(runs)
-	sgnVar=np.std(sgnRes,axis=0)**2/len(runs)
-	# take op-sgn covariance into account too...
-	return (np.mean(opRes,axis=0)/p.mean(sgnRes,axis=0),-1)
+		for r in runs[i][warmUp:]:
+			opAcc+=op(r[2])
+			sgnAcc+=r[1]
+		opRes.append(opAcc/sgnAcc)
+
+	return (np.mean(opRes,axis=0),np.std(opRes,axis=0)/np.sqrt(len(opRes)))
 
 def getG(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nThreads,nWarmupSweeps,nSweepsPerThread,stabilize=True,nSamples=1):
 	
