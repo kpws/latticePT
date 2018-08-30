@@ -54,6 +54,7 @@ class ProdState:
 	def __repr__(self):
 		return str(self)
 
+(1,3 ,8,5,9)
 
 def c2i(sys,coords):
 	n=1

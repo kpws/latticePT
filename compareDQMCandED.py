@@ -21,7 +21,7 @@ nTau=math.ceil(beta*tausPerBeta/m)*m
 
 nThreads=1  #multithreading doesn't work on mac, (wtf) https://stackoverflow.com/questions/9879371/segfault-using-numpys-lapack-lite-with-multiprocessing-on-osx-not-linux)
 nSamples=6
-nWarmupSweeps=20
+nWarmupSweeps=200
 nSweepsPerThread=20*nWarmupSweeps #increase for less statistical error
 
 taus=[taui/nTau*beta for taui in range(nTau)]

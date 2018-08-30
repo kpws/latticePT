@@ -56,21 +56,60 @@ def getNTau(beta, nTauPerBeta, m):
 	# while nTau<minN: nTau*=2
 	return minN
 
+def timeOrder(g,nTau):
+	g2=np.zeros((2,nTau,nx*ny,nTau,nx*ny))
+	for taui1 in range(nTau):
+		for taui2 in range(nTau):
+			g2[:,taui1,:,taui2]=g[:,taui1,:,taui2]*(1 if taui1<taui2 else -1)
+	return g2
+
 def symmetrizeG(g,nTau,nx,ny):
 	gsym=np.zeros((nTau,nx*ny))
-	for tau in range(nTau):
-		for dtau in range(nTau):
-			for x in range(nx):
-				for y in range(ny):
-					for dx in range(nx):
-						for dy in range(ny):
-							for sigi in range(2):
-								i1=x+nx*y
-								i2=(x+dx)%nx+nx*((y+dy)%ny)
-								i3=dx+nx*dy
-								gsym[dtau,i3]+=g[sigi,tau,(tau+dtau)%nTau,i1,i2]
-								# gsym[:,i3]+=np.roll(g[sigi,tau,:,i1,i2],tau)
-	return gsym/(2*nTau*nx*nx)
+	for dtau in range(nTau):
+		tmp=np.sum(np.trace(np.roll(g,-dtau,axis=2),axis1=1,axis2=2),axis=0)#why trace? loses info
+		for x in range(nx):
+			for y in range(ny):
+				for dx in range(nx):
+					for dy in range(ny):
+						i1=x+nx*y
+						i2=(x+dx)%nx+nx*((y+dy)%ny)
+						i3=dx+nx*dy
+						gsym[dtau,i3]+=tmp[i1,i2]
+						# gsym[:,i3]+=np.roll(g[sigi,tau,:,i1,i2],tau)
+	return gsym/(2*nTau*nx*ny)
+
+def momentumG(g,nTau,nx,ny,beta):
+	gxy=np.zeros((2,nTau,nx,ny,nTau,nx,ny))
+
+	for x1 in range(nx):
+		for y1 in range(ny):
+			# gxy[:,:,x1,y1,:,:,:]=g[:,:,:,x1+nx*y1].reshape(2,nTau,nTau,nx,ny)
+			for x2 in range(nx):
+				for y2 in range(ny):
+					gxy[:,:,x1,y1,:,x2,y2]=g[:,:,:,x1+nx*y1,x2+nx*y2]
+
+
+	for t1 in range(nTau):
+		for t2 in range(nTau):
+			if t2<t1+1:
+				gxy[:,t1,:,:,t2,:,:]=-gxy[:,t1,:,:,t2,:,:]
+			# if t1==t2:
+				# gxy[:,t1,:,:,t2,:,:]-=[.5*np.identity(nx*ny).reshape((nx,ny,nx,ny))]*2
+	# print(gxy[0,:,0,0,:,0,0])
+	# exit(0)
+	#gxy=np.concatenate((gxy,-gxy),axis=1)
+	#gxy=np.concatenate((gxy,-gxy),axis=4)
+	fermFactor1=np.exp(-1j*np.pi*np.arange(nTau)/nTau)
+	fermFactor2=np.exp(-1j*np.pi*np.arange(nTau)/nTau)
+	# # use reshape?
+	ret=(beta/(nTau*nx*ny))**2*np.fft.fftn(gxy
+	 	*fermFactor1[np.newaxis,:,np.newaxis,np.newaxis,np.newaxis,np.newaxis,np.newaxis]
+	 	*fermFactor2[np.newaxis,np.newaxis,np.newaxis,np.newaxis,:,np.newaxis,np.newaxis],axes=(1,2,3,4,5,6))
+	#ret=(beta/(nTau*nx*ny))**2*np.fft.fftn(gxy,axes=(2,3,5,6))#[:,1::2,:,:,1::2,:,:]
+
+	#reverse second part per convention
+	ret=np.roll(np.flip(ret,(1,5,6)),(1,1),axis=(5,6))
+	return ret
 # def updateBtree(tree,m,taui,newB):
 # 	Bs=tree[0]
 # 	Bs[taui]=newB
@@ -169,7 +208,7 @@ def dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntauOverm,m,seed,nSweeps,stabilize,
 			K[here, xp%nx+nx*yp]-=tne
 
 			K[here, xp%nx+nx*yn]-=tnw
-			K[here, xn%nx+nx*yp]-=tnw
+			K[here, xn%nx+nx*yp]-=tnw	
 	
 	Kexp=scipy.linalg.expm(-deltaTau*K)
 	iKexp=scipy.linalg.expm(deltaTau*K)
@@ -471,9 +510,10 @@ def genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nSamplesPerRun,measu
 			sgns.append(sgn)
 			gs.append(g)
 		seed=startSeed+run
-		file=os.path.join(dirname, str(seed)+".npz")
+		fn=str(seed)+".npz"
+		file=os.path.join(dirname, fn)
 		if os.path.exists(file):
-			print("ERROR: run already exists, "+file)
+			print("Skipping, run already exists: "+fn)
 		else:
 			dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntau//m,m,seed,(nSamplesPerRun-1)*measurePeriod+1,True,
 				[],measurePeriod=measurePeriod,saveSamples=save,progressStart=run/nRuns,progressFinish=(run+1)/nRuns)
@@ -486,9 +526,10 @@ def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
 	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
 	print("Found {n} previous runs.".format(n=len(files)))
 	runs=[]
-	for f in files:
-		loaded = np.load(os.path.join(path, f))
+	for i in range(len(files)):
+		loaded = np.load(os.path.join(path, files[i]))
 		runs.append(list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs'])))
+		print('\tRun {i}: {n} configurations'.format(i=i,n=len(runs[-1])))
 
 	return runs
 
@@ -496,14 +537,16 @@ def getAutocorrelator(run, length):
 	assert(0<len(run)-length)
 	return [sum(run[i][2]*run[i+l][2] for i in range(len(run)-length))/(len(run)-length) for l in range(length)]
 
-def averageOverG(runs,op,warmUp):
+def averageOverG(runs,op,warmUp,showProgress=False):
 	opRes=[]
 	for i in range(len(runs)):
 		opAcc=0
 		sgnAcc=0
-		for r in runs[i][warmUp:]:
-			opAcc+=op(r[2])
-			sgnAcc+=r[1]
+		for j in range(warmUp,len(runs[i])):
+			if showProgress:
+				print("Progress {:2.1%}".format((i*(len(runs[i])-warmUp)+j-warmUp)/((len(runs[i])-warmUp)*len(runs))), end="\r")
+			opAcc+=op(runs[i][j][2])
+			sgnAcc+=runs[i][j][1]
 		opRes.append(opAcc/sgnAcc)
 
 	return (np.mean(opRes,axis=0),np.std(opRes,axis=0)/np.sqrt(len(opRes)))
