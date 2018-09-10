@@ -22,8 +22,8 @@ tx=1
 ty=1
 tne=0
 tnw=0
-# U=5/100 #4
 U=4
+# U=.05
 mu=0
 beta=2
 
@@ -43,7 +43,7 @@ nTauPerBeta=8
 
 nTau=dqmc.getNTau(beta, nTauPerBeta, m)
 
-nSamplesPerRun=1#measurePeriod*20
+nSamplesPerRun=80#measurePeriod*20
 
 clean=False
 if clean:
@@ -53,34 +53,37 @@ if clean:
 		file_path = os.path.join(folder, f)
 		if os.path.isfile(file_path):
 			os.unlink(file_path)
-if False:
+if True:
 	l=np.load('cache/G2G4{U}.npz'.format(U=U))
 	G4ppQ0=l['G4ppQ0']
+	G4ppQ0Err=l['G4ppQ0']
 	Gmom=l['Gmom']
+	GmomErr=l['GmomErr']
 else:
 	print("Generating field configurations..")
-	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=8,nThreads=1,startSeed=0)
+	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=16,nThreads=1,startSeed=0)
 
 	print("Loading field configurations..")
 	cl=nSamplesPerRun-1
 	runs=dqmc.loadRuns(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
+	runs=[r for r in runs if len(r)==80]
 	# runs=runs[:2]
 	#TODO, figure out optimal warmUp
 	warmUp=3
 
-	# ac=np.array(np.mean([dqmc.getAutocorrelator(r,cl) for r in runs],axis=0))
-
-	# # pl.plot(ac[:,0,0,0,0,0])
-
-	# pl.plot(np.mean(ac,axis=(1,2,3,4,5)))
+	pl.figure()
+	ac=np.array(np.mean([dqmc.getAutocorrelator(r,cl) for r in runs],axis=0))
+	pl.plot(ac[:,0,0,0,0,0])
+	pl.plot(np.mean(ac,axis=(1,2,3,4,5)))
+	pl.show()
 
 	print("Calculating G in real space..")
 	G,G_err=dqmc.averageOverG(runs,lambda g:dqmc.symmetrizeG(g,nTau,nx,ny),warmUp,showProgress=True)
-	print(G)
+	# print(G)
 	#time order?
 	
 	print("Calculating spin averaged G in momentum space..")
-	Gmom,Gmom_err=dqmc.averageOverG(runs,lambda g:nx*ny/beta*np.mean(dqmc.momentumG(g,nTau,nx,ny,beta),axis=0),warmUp,showProgress=True)
+	Gmom,GmomErr=dqmc.averageOverG(runs,lambda g:nx*ny/beta*np.mean(dqmc.momentumG(g,nTau,nx,ny,beta),axis=0),warmUp,showProgress=True)
 	pl.figure()
 	pl.imshow(np.real(Gmom[:,0,0,:,0,0]))
 	pl.figure()
@@ -90,6 +93,10 @@ else:
 	Gmom=np.diagonal(Gmom,axis1=0,axis2=3) 
 	Gmom=np.diagonal(Gmom,axis1=0,axis2=2)
 	Gmom=np.diagonal(Gmom,axis1=0,axis2=1)
+
+	GmomErr=np.diagonal(GmomErr,axis1=0,axis2=3) 
+	GmomErr=np.diagonal(GmomErr,axis1=0,axis2=2)
+	GmomErr=np.diagonal(GmomErr,axis1=0,axis2=1)
 
 	#Gmom=dqmc.momentumG(np.array([G,G]),nTau,nx,ny,beta) #todo, extract diagonal pof above instead?
 
@@ -106,7 +113,7 @@ else:
 	#get a modest speedup if we combine these and FT only once..
 	print("Calculating 4-point function with (0,0) p-p COM momentum..")
 	G4ppQ0,G4ppQ0Err=dqmc.averageOverG(runs,lambda g:G4pp(g,nTau,nx,ny,(0,0)),warmUp,showProgress=True)
-	np.savez_compressed('cache/G2G4{U}.npz'.format(U=U), G4ppQ0=G4ppQ0,Gmom=Gmom)
+	np.savez_compressed('cache/G2G4{U}.npz'.format(U=U), G4ppQ0=G4ppQ0,G4ppQ0Err=G4ppQ0Err,Gmom=Gmom,GmomErr=GmomErr)
 
 # print("Calculating 4-point function with (π,π) p-h COM momentum..")
 # G4phQpipi,G4phQpipiErr=dqmc.averageOverG(runs,lambda g:G4ph(g,nTau,nx,ny,(0,nx//2,ny//2)),warmUp,showProgress=True)
@@ -116,9 +123,18 @@ GmomExt=Gmom
 GmomReverse=np.roll(np.flip(GmomExt),(1,1),axis=(1,2))
 
 # pl.figure()
-# pl.plot(GmomExt[:,0,0])
-# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+# for i in range(nx):
+# 	pl.errorbar(range(nTau),Gmom[:,i,0],yerr=GmomErr[:,i,0])
+# # pl.plot(GmomReverse[:,0,(ny-0)%ny])
+# pl.title('GmomExt')
 # pl.show()
+
+pl.figure()
+for i in range(nx):
+	pl.errorbar(range(nTau),G4ppQ0[0,0,0,:,i,0],yerr=G4ppQ0Err[0,0,0,:,i,0])
+# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+pl.title('GmomExt')
+pl.show()
 
 # G4red=(-G4ppQ0)/np.diag((GmomExt*GmomReverse).reshape(nTau*nx*ny)).reshape((nTau,nx,ny)*2)
 
@@ -128,6 +144,13 @@ GmomReverse=np.roll(np.flip(GmomExt),(1,1),axis=(1,2))
 G4red=(-G4ppQ0)
 
 G4red=G4red/GmomExt[np.newaxis,np.newaxis,np.newaxis,:,:,:]/GmomReverse[np.newaxis,np.newaxis,np.newaxis,:,:,:]
+
+pl.figure()
+for i in range(nx):
+	pl.plot(G4red[0,i,0,:,0,0])
+# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+pl.title('G4red')
+pl.show()
 
 M=-G4red.reshape((nTau*nx*ny,)*2)
 # pl.figure()

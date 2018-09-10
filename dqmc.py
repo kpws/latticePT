@@ -91,20 +91,19 @@ def momentumG(g,nTau,nx,ny,beta):
 
 	for t1 in range(nTau):
 		for t2 in range(nTau):
-			if t2<t1+1:
+			if t2<t1:
 				gxy[:,t1,:,:,t2,:,:]=-gxy[:,t1,:,:,t2,:,:]
-			# if t1==t2:
-				# gxy[:,t1,:,:,t2,:,:]-=[.5*np.identity(nx*ny).reshape((nx,ny,nx,ny))]*2
+			if t1==t2:
+				gxy[:,t1,:,:,t2,:,:]-=[.5*np.identity(nx*ny).reshape((nx,ny,nx,ny))]*2
 	# print(gxy[0,:,0,0,:,0,0])
 	# exit(0)
 	#gxy=np.concatenate((gxy,-gxy),axis=1)
 	#gxy=np.concatenate((gxy,-gxy),axis=4)
-	fermFactor1=np.exp(-1j*np.pi*np.arange(nTau)/nTau)
-	fermFactor2=np.exp(-1j*np.pi*np.arange(nTau)/nTau)
+	fermFactor=np.exp(-1j*np.pi*np.arange(nTau)/nTau)
 	# # use reshape?
 	ret=(beta/(nTau*nx*ny))**2*np.fft.fftn(gxy
-	 	*fermFactor1[np.newaxis,:,np.newaxis,np.newaxis,np.newaxis,np.newaxis,np.newaxis]
-	 	*fermFactor2[np.newaxis,np.newaxis,np.newaxis,np.newaxis,:,np.newaxis,np.newaxis],axes=(1,2,3,4,5,6))
+	 	*fermFactor[np.newaxis,:,np.newaxis,np.newaxis,np.newaxis,np.newaxis,np.newaxis]
+	 	*fermFactor[np.newaxis,np.newaxis,np.newaxis,np.newaxis,:,np.newaxis,np.newaxis],axes=(1,2,3,4,5,6))
 	#ret=(beta/(nTau*nx*ny))**2*np.fft.fftn(gxy,axes=(2,3,5,6))#[:,1::2,:,:,1::2,:,:]
 
 	#reverse second part per convention
@@ -523,7 +522,7 @@ def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
 	import os
 	from os.path import isfile, join
 	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
-	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.npz')]
 	print("Found {n} previous runs.".format(n=len(files)))
 	runs=[]
 	for i in range(len(files)):
@@ -539,6 +538,7 @@ def getAutocorrelator(run, length):
 
 def averageOverG(runs,op,warmUp,showProgress=False):
 	opRes=[]
+	nConfs=0
 	for i in range(len(runs)):
 		opAcc=0
 		sgnAcc=0
@@ -547,7 +547,9 @@ def averageOverG(runs,op,warmUp,showProgress=False):
 				print("Progress {:2.1%}".format((i*(len(runs[i])-warmUp)+j-warmUp)/((len(runs[i])-warmUp)*len(runs))), end="\r")
 			opAcc+=op(runs[i][j][2])
 			sgnAcc+=runs[i][j][1]
+		weight=len(runs[i])-warmUp
 		opRes.append(opAcc/sgnAcc)
+		nConfs+=weight
 
 	return (np.mean(opRes,axis=0),np.std(opRes,axis=0)/np.sqrt(len(opRes)))
 
