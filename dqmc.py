@@ -518,7 +518,7 @@ def genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nSamplesPerRun,measu
 				[],measurePeriod=measurePeriod,saveSamples=save,progressStart=run/nRuns,progressFinish=(run+1)/nRuns)
 			np.savez_compressed(file, sweeps=np.array(sweeps), sgns=np.array(sgns), gs=np.array(gs))
 
-def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
+def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,maxN=-1):
 	import os
 	from os.path import isfile, join
 	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
@@ -526,6 +526,8 @@ def loadRuns(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m):
 	print("Found {n} previous runs.".format(n=len(files)))
 	runs=[]
 	for i in range(len(files)):
+		if i==maxN:
+			break
 		loaded = np.load(os.path.join(path, files[i]))
 		runs.append(list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs'])))
 		print('\tRun {i}: {n} configurations'.format(i=i,n=len(runs[-1])))

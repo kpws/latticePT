@@ -1,9 +1,16 @@
-import pylab as pl
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as pl
+
 import dqmc
 import math	
 import numpy as np
 import numpy.linalg
 
+experimentName='1'
+
+def savefig(n):
+	pl.savefig('plots/'+experimentName + n +'.pdf')
 # nx=1
 # ny=2
 # tx=1
@@ -43,7 +50,7 @@ nTauPerBeta=8
 
 nTau=dqmc.getNTau(beta, nTauPerBeta, m)
 
-nSamplesPerRun=80#measurePeriod*20
+nSamplesPerRun=1000#measurePeriod*20
 
 clean=False
 if clean:
@@ -53,7 +60,7 @@ if clean:
 		file_path = os.path.join(folder, f)
 		if os.path.isfile(file_path):
 			os.unlink(file_path)
-if True:
+if False:
 	l=np.load('cache/G2G4{U}.npz'.format(U=U))
 	G4ppQ0=l['G4ppQ0']
 	G4ppQ0Err=l['G4ppQ0']
@@ -61,12 +68,12 @@ if True:
 	GmomErr=l['GmomErr']
 else:
 	print("Generating field configurations..")
-	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=16,nThreads=1,startSeed=0)
+	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=10,nThreads=1,startSeed=0)
 
 	print("Loading field configurations..")
 	cl=nSamplesPerRun-1
-	runs=dqmc.loadRuns(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
-	runs=[r for r in runs if len(r)==80]
+	runs=dqmc.loadRuns(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,maxN=2)
+	#runs=[r for r in runs if len(r)==80]
 	# runs=runs[:2]
 	#TODO, figure out optimal warmUp
 	warmUp=3
@@ -75,7 +82,7 @@ else:
 	ac=np.array(np.mean([dqmc.getAutocorrelator(r,cl) for r in runs],axis=0))
 	pl.plot(ac[:,0,0,0,0,0])
 	pl.plot(np.mean(ac,axis=(1,2,3,4,5)))
-	pl.show()
+	savefig('autoCorr')
 
 	print("Calculating G in real space..")
 	G,G_err=dqmc.averageOverG(runs,lambda g:dqmc.symmetrizeG(g,nTau,nx,ny),warmUp,showProgress=True)
@@ -84,10 +91,10 @@ else:
 	
 	print("Calculating spin averaged G in momentum space..")
 	Gmom,GmomErr=dqmc.averageOverG(runs,lambda g:nx*ny/beta*np.mean(dqmc.momentumG(g,nTau,nx,ny,beta),axis=0),warmUp,showProgress=True)
-	pl.figure()
-	pl.imshow(np.real(Gmom[:,0,0,:,0,0]))
-	pl.figure()
-	pl.imshow(np.imag(Gmom[:,0,0,:,0,0]))
+	#pl.figure()
+	#pl.imshow(np.real(Gmom[:,0,0,:,0,0]))
+	#pl.figure()
+	#pl.imshow(np.imag(Gmom[:,0,0,:,0,0]))
 	# pl.show()
 	# exit(0)
 	Gmom=np.diagonal(Gmom,axis1=0,axis2=3) 
@@ -134,8 +141,7 @@ for i in range(nx):
 	pl.errorbar(range(nTau),G4ppQ0[0,0,0,:,i,0],yerr=G4ppQ0Err[0,0,0,:,i,0])
 # pl.plot(GmomReverse[:,0,(ny-0)%ny])
 pl.title('GmomExt')
-pl.show()
-
+savefig('GmomExt')
 # G4red=(-G4ppQ0)/np.diag((GmomExt*GmomReverse).reshape(nTau*nx*ny)).reshape((nTau,nx,ny)*2)
 
 # pl.contourf(range(nx),range(ny),GmomExt[nTau//2])
@@ -150,7 +156,7 @@ for i in range(nx):
 	pl.plot(G4red[0,i,0,:,0,0])
 # pl.plot(GmomReverse[:,0,(ny-0)%ny])
 pl.title('G4red')
-pl.show()
+savefig('G4red')
 
 M=-G4red.reshape((nTau*nx*ny,)*2)
 # pl.figure()
@@ -181,8 +187,7 @@ pl.legend()
 # pl.plot(G4ppQ0[nTau//2+7,0,0,:,0,0],'x-')
 # pl.plot(G4red[nTau//2+7,0,0,:,0,0],'x-')
 # pl.plot(G4red[nTau//2+3,0,0,:,0,0],'x-')
-pl.show()
-
+savefig('Chi')
 # exit(0)
 
 
@@ -284,5 +289,4 @@ if nx*ny<5:
 # pl.figure()
 # pl.plot(g[0,0,:,0,:])
 # pl.plot(gsym[:,:])
-
-pl.show()
+savefig('G')
