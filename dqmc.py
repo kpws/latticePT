@@ -538,6 +538,29 @@ def getAutocorrelator(run, length):
 	assert(0<len(run)-length)
 	return [sum(run[i][2]*run[i+l][2] for i in range(len(run)-length))/(len(run)-length) for l in range(length)]
 
+def averageOverGFiles(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgress=False):
+	import os
+	from os.path import isfile, join
+	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
+	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.npz')]
+	print("Found {n} previous runs.".format(n=len(files)))
+	opRes=[]
+	nConfs=0
+	for i in range(len(files)):
+		loaded = np.load(os.path.join(path, files[i]))
+		run=list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
+		opAcc=0
+		sgnAcc=0
+		for j in range(warmUp,len(run)):
+			if showProgress:
+				print("Progress {:2.1%}".format((i*(len(run)-warmUp)+j-warmUp)/((len(run)-warmUp)*len(files))), end="\r")
+			opAcc+=op(run[j][2])
+			sgnAcc+=run[j][1]
+		weight=len(run)-warmUp
+		opRes.append(opAcc/sgnAcc)
+		nConfs+=weight
+	return (np.mean(opRes,axis=0),np.std(opRes,axis=0)/np.sqrt(len(opRes)))
+
 def averageOverG(runs,op,warmUp,showProgress=False):
 	opRes=[]
 	nConfs=0

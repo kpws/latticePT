@@ -6,6 +6,7 @@ import dqmc
 import math	
 import numpy as np
 import numpy.linalg
+import scipy.sparse.linalg
 
 experimentName='1'
 
@@ -60,37 +61,38 @@ if clean:
 		file_path = os.path.join(folder, f)
 		if os.path.isfile(file_path):
 			os.unlink(file_path)
-if False:
+if True:
 	l=np.load('cache/G2G4{U}.npz'.format(U=U))
 	G4ppQ0=l['G4ppQ0']
-	G4ppQ0Err=l['G4ppQ0']
+	G4ppQ0Err=l['G4ppQ0Err']
 	Gmom=l['Gmom']
 	GmomErr=l['GmomErr']
 else:
 	print("Generating field configurations..")
-	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=10,nThreads=1,startSeed=0)
+	dqmc.genGSamples(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,nTauPerBeta,nSamplesPerRun,nRuns=18,nThreads=1,startSeed=0)
 
 	print("Loading field configurations..")
 	cl=nSamplesPerRun-1
-	runs=dqmc.loadRuns(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,maxN=2)
+	#runs=dqmc.loadRuns(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,maxN=1)
+
 	#runs=[r for r in runs if len(r)==80]
 	# runs=runs[:2]
 	#TODO, figure out optimal warmUp
-	warmUp=3
+	warmUp=2*nTau+1
 
-	pl.figure()
-	ac=np.array(np.mean([dqmc.getAutocorrelator(r,cl) for r in runs],axis=0))
-	pl.plot(ac[:,0,0,0,0,0])
-	pl.plot(np.mean(ac,axis=(1,2,3,4,5)))
-	savefig('autoCorr')
+	#pl.figure()
+	#ac=np.array(np.mean([dqmc.getAutocorrelator(r,cl) for r in runs],axis=0))
+	#pl.plot(ac[:,0,0,0,0,0])
+	#pl.plot(np.mean(ac,axis=(1,2,3,4,5)))
+	#savefig('autoCorr')
 
 	print("Calculating G in real space..")
-	G,G_err=dqmc.averageOverG(runs,lambda g:dqmc.symmetrizeG(g,nTau,nx,ny),warmUp,showProgress=True)
+	G,G_err=dqmc.averageOverGFiles(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:dqmc.symmetrizeG(g,nTau,nx,ny),warmUp,showProgress=True)
 	# print(G)
 	#time order?
 	
 	print("Calculating spin averaged G in momentum space..")
-	Gmom,GmomErr=dqmc.averageOverG(runs,lambda g:nx*ny/beta*np.mean(dqmc.momentumG(g,nTau,nx,ny,beta),axis=0),warmUp,showProgress=True)
+	Gmom,GmomErr=dqmc.averageOverGFiles(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:nx*ny/beta*np.mean(dqmc.momentumG(g,nTau,nx,ny,beta),axis=0),warmUp,showProgress=True)
 	#pl.figure()
 	#pl.imshow(np.real(Gmom[:,0,0,:,0,0]))
 	#pl.figure()
@@ -119,7 +121,7 @@ else:
 
 	#get a modest speedup if we combine these and FT only once..
 	print("Calculating 4-point function with (0,0) p-p COM momentum..")
-	G4ppQ0,G4ppQ0Err=dqmc.averageOverG(runs,lambda g:G4pp(g,nTau,nx,ny,(0,0)),warmUp,showProgress=True)
+	G4ppQ0,G4ppQ0Err=dqmc.averageOverGFiles(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:G4pp(g,nTau,nx,ny,(0,0)),warmUp,showProgress=True)
 	np.savez_compressed('cache/G2G4{U}.npz'.format(U=U), G4ppQ0=G4ppQ0,G4ppQ0Err=G4ppQ0Err,Gmom=Gmom,GmomErr=GmomErr)
 
 # print("Calculating 4-point function with (π,π) p-h COM momentum..")
@@ -136,53 +138,90 @@ GmomReverse=np.roll(np.flip(GmomExt),(1,1),axis=(1,2))
 # pl.title('GmomExt')
 # pl.show()
 
+print("1")
 pl.figure()
-for i in range(nx):
-	pl.errorbar(range(nTau),G4ppQ0[0,0,0,:,i,0],yerr=G4ppQ0Err[0,0,0,:,i,0])
+for i in range(nTau):
+	pl.errorbar(range(nTau),np.real(G4ppQ0[i,0,0,:,0,0]),yerr=np.real(G4ppQ0Err[i,0,0,:,0,0]))
 # pl.plot(GmomReverse[:,0,(ny-0)%ny])
 pl.title('GmomExt')
+pl.ylim([-0.00001,0.00000025])
 savefig('GmomExt')
 # G4red=(-G4ppQ0)/np.diag((GmomExt*GmomReverse).reshape(nTau*nx*ny)).reshape((nTau,nx,ny)*2)
 
 # pl.contourf(range(nx),range(ny),GmomExt[nTau//2])
 
+pl.figure()
+G2ppQ0sub=G4ppQ0
+for i in range(nTau):
+	pl.errorbar(range(nTau),np.real(G2ppQ0sub[i,0,0,:,0,0]),yerr=np.real(G4ppQ0Err[i,0,0,:,0,0]))
+# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+pl.title('GmomExtSub')
+#pl.ylim([-0.00025,0.00025])
+savefig('GmomExtSub')
+#
 
 G4red=(-G4ppQ0)
 
 G4red=G4red/GmomExt[np.newaxis,np.newaxis,np.newaxis,:,:,:]/GmomReverse[np.newaxis,np.newaxis,np.newaxis,:,:,:]
 
 pl.figure()
-for i in range(nx):
-	pl.plot(G4red[0,i,0,:,0,0])
+for i in range(nTau):
+	pl.plot(np.real(G4red[i,0,0,:,0,0]))
 # pl.plot(GmomReverse[:,0,(ny-0)%ny])
 pl.title('G4red')
+pl.ylim([-.01,.01])
 savefig('G4red')
 
+print("asaadf")
 M=-G4red.reshape((nTau*nx*ny,)*2)
 # pl.figure()
 # pl.plot(G4red[nTau//2+7,0,0,:,0,0],'x-')
 G4red+=np.identity(nTau*nx*ny).reshape((nTau,nx,ny)*2)
 # pl.plot(G4red[nTau//2+7,0,0,:,0,0],'x-')
-G4red=G4red/GmomExt[:,:,:,np.newaxis,np.newaxis,np.newaxis]/GmomReverse[:,:,:,np.newaxis,np.newaxis,np.newaxis]
 #*(beta*nx*ny) typo in https://sci-hub.tw/https://journals.aps.org/prb/pdf/10.1103/PhysRevB.47.6157 ?
 # pl.figure()
 # pl.plot(G4red[nTau//2+7,0,0,:,0,0],'x-')
 
-M2=1/(beta*nx*ny)*G4red*GmomExt[np.newaxis,np.newaxis,np.newaxis,:,:,:]*GmomReverse[np.newaxis,np.newaxis,np.newaxis,:,:,:]
+print("asdf")
+pl.figure()
+for i in range(nTau):
+	pl.plot(np.real(G4red[i,0,0,:,0,0]))
+# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+pl.title('G4red2')
+pl.ylim([-.01,.03])
+savefig('G4red2')
+
+G4red=(beta*nx*ny)*G4red/GmomExt[:,:,:,np.newaxis,np.newaxis,np.newaxis]/GmomReverse[:,:,:,np.newaxis,np.newaxis,np.newaxis]
+#G4red=G4red/GmomExt[:,:,:,np.newaxis,np.newaxis,np.newaxis]/GmomReverse[:,:,:,np.newaxis,np.newaxis,np.newaxis]
+
+print("asdf")
+pl.figure()
+for i in range(nTau):
+	pl.plot(np.real(G4red[i,0,0,:,0,0]))
+# pl.plot(GmomReverse[:,0,(ny-0)%ny])
+pl.title('G4red3')
+#pl.ylim([-.01,.03])
+savefig('G4red3')
+
+
+M2=1/(beta*nx*ny)*G4red*GmomExt[:,:,:,np.newaxis,np.newaxis,np.newaxis]*GmomReverse[:,:,:,np.newaxis,np.newaxis,np.newaxis]
 M2=np.identity(nTau*nx*ny)-M2.reshape((nTau*nx*ny,)*2)
-print("M/M2")
-print(M/M2)
+#print("M/M2")
+#print(M/M2)
 # pl.figure()
 G4ired=np.transpose(np.linalg.solve(np.transpose(M2),np.transpose(G4red.reshape((nTau*nx*ny,)*2)))).reshape((nTau,nx,ny)*2)
 
 pilist=([[nx//2-i,0+i] for i in range(nx//2)]
 		+[[(-i)%nx,nx//2-i] for i in range(nx//2)]
 		+[[(nx//2+i)%nx,(-i)%nx] for i in range(nx//2)]
-		+[[i%nx,(-nx//2+i)%nx] for i in range(nx//2)])
+		+[[i%nx,(-nx//2+i)%nx] for i in range(nx//2+1)])
 # pl.plot(*np.transpose(((np.array(pilist)+nx//2-1)%nx-nx//2+1)*2*np.pi/nx),'x-')
 pl.figure()
-pl.plot([np.real(G4red[nTau//2,p[0],p[1],nTau//2,nx//2,0]) for p in pilist],'x-',label='reducible')
-pl.plot([np.real(G4ired[nTau//2,p[0],p[1],nTau//2,nx//2,0]) for p in pilist],'x-',label='ireducible')
+wi=0
+ppx=nx//2
+ppy=0
+pl.plot([np.real(G4red[wi,p[0],p[1],wi,ppx,ppy]) for p in pilist],'x-',label='reducible')
+pl.plot([np.real(G4ired[wi,p[0],p[1],wi,ppx,ppy]) for p in pilist],'x-',label='ireducible')
 pl.legend()
 # pl.plot(G4ppQ0[nTau//2+7,0,0,:,0,0],'x-')
 # pl.plot(G4red[nTau//2+7,0,0,:,0,0],'x-')
@@ -191,22 +230,35 @@ savefig('Chi')
 # exit(0)
 
 
-# Mpp=-(1/(beta*nx*ny))*G4ppQ0
-
+Mpp=-1/(beta*nx*ny)*G4ired*GmomExt[np.newaxis,np.newaxis,np.newaxis,:,:,:]*GmomReverse[np.newaxis,np.newaxis,np.newaxis,:,:,:]
+bandWidth=(2*tx+2*ty)
+cutOff=2*bandWidth
+cutOut=[i for i in range(nTau) if (i<nTau//2 and (2*i+1)*np.pi/beta>cutOff) or (i>=nTau//2 and (2*((nTau-1)-i)+1)*np.pi/beta>cutOff)]
+IRnTau=nTau-len(cutOut)
+Mpp=np.delete(Mpp,cutOut,0)
+Mpp=np.delete(Mpp,cutOut,3)
+print(Mpp.shape)
 # # pl.figure()
 # # pl.contourf(Mpp)
 # # pl.show()
 # # exit(0)
 
-# la, phi=np.linalg.eig(Mpp)
-# # sortedOrder=sorted(range(len(la)),key=lambda i:abs(1-1/la[i]-1))
-# # la=la[sortedOrder]
-# # phi=phi[sortedOrder]
-# pl.figure()
-# for p in phi[:5]:
-# 	pl.plot(pl.imag(p.reshape(nTau,nx,ny)[:,0,0]))
-# pl.show()
-# # exit(0)
+print("calculating eigenvalues..")
+la,phi=scipy.sparse.linalg.eigs(Mpp.reshape((IRnTau*nx*ny,)*2),2,which='LR')
+print(la)
+pl.figure()
+for p in np.transpose(phi):
+	pl.plot([np.real(p.reshape(IRnTau,nx,ny)[0,i[0],i[1]]) for i in pilist])
+savefig("phi_vs_p")
+
+pl.figure()
+for p in np.transpose(phi):
+	pxi=nx//2
+	pyi=0
+	pl.plot(np.real(p.reshape(IRnTau,nx,ny)[:,pxi,pyi]))
+savefig("phi_vs_w")
+exit(0)
+
 # print(la)
 # print(1-1/la)
 # for p in phi[:1]:
