@@ -88,7 +88,6 @@ def momentumG(g,nTau,nx,ny,beta):
 				for y2 in range(ny):
 					gxy[:,:,x1,y1,:,x2,y2]=g[:,:,:,x1+nx*y1,x2+nx*y2]
 
-
 	for t1 in range(nTau):
 		for t2 in range(nTau):
 			if t2<t1:
@@ -538,7 +537,7 @@ def getAutocorrelator(run, length):
 	assert(0<len(run)-length)
 	return [sum(run[i][2]*run[i+l][2] for i in range(len(run)-length))/(len(run)-length) for l in range(length)]
 
-def averageOverGFiles(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgress=False):
+def measure(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgress=False,limitNumRuns=-1,nThreads=1, nBins=1):
 	import os
 	from os.path import isfile, join
 	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
@@ -546,17 +545,115 @@ def averageOverGFiles(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgres
 	print("Found {n} previous runs.".format(n=len(files)))
 	opRes=[]
 	nConfs=0
-	for i in range(len(files)):
-		loaded = np.load(os.path.join(path, files[i]))
-		run=list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
+		
+	if limitNumRuns==-1: limitNumRuns=len(files)	
+	binSize=limitNumRuns//nBins
+	nFiles=binSize*nBins
+	if nFiles!=limitNumRuns:
+		print("Skipping {n}/{tot} runs to get equally sized bins.".format(n=limitNumRuns-nFiles,tot=limitNumRuns))
+	print("Loading first run..")
+	loaded = np.load(os.path.join(path, files[0]))
+	nextSamples=list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
+	manager = multiprocessing.Manager()
+	return_dict = manager.dict()
+	bins=[]
+	for i in range(nFiles):
+		print("Progress {:2.1%}".format(i/limitNumRuns))
+		runs=nextSamples#list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
+		def work(wi,start,end,return_dict):
+			return_dict[wi] =sum(op(runs[r][2])*runs[r][1] for r in range(start,end))
+	
+		print("Setting up processes..")
+		bs=math.ceil(len(runs)/nThreads)
+		job=[multiprocessing.Process(target=work, args=(t, t*bs,min((t+1)*bs,len(runs)),return_dict)) for t in range(nThreads)]
+		print("Starting processes..")
+		for t in job: t.start()
+		if i+1<nFiles:
+			print("Preloading next run..")
+			loaded = np.load(os.path.join(path, files[i+1]))
+			nextSamples=list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
+
+		print("Joining processes..")
+		for t in job: t.join()
+		
+		opSum=sum(return_dict.values())
+		sgnSum=sum(r[1] for r in runs)
+		oneSum=len(runs)
+		if i%binSize==0:
+			print("New bin..")
+			bins.append([opSum,sgnSum,oneSum])
+		else:
+			bins[-1][0]+=opSum
+			bins[-1][1]+=sgnSum
+			bins[-1][2]+=oneSum
+	#print(opRes)
+	#print(sgnRes)
+	return bins#np.array(b[0] for b in bins)/,np.array(sgnRes)
+
+def averageOverGFiles(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgress=False,limitNumRuns=-1,nThreads=1, nBins=-1):
+	import os
+	from os.path import isfile, join
+	path=getDirName(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m)
+	files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)) and f.endswith('.npz')]
+	print("Found {n} previous runs.".format(n=len(files)))
+	opRes=[]
+	nConfs=0
+	if nThreads>1:
+		import multiprocessing
+		
+	if limitNumRuns==-1: limitNumRuns=len(files)	
+	print("Loading first run..")
+	loaded = np.load(os.path.join(path, files[0]))
+	for i in range(limitNumRuns):
+		runs=list(zip(loaded['sweeps'],loaded['sgns'],loaded['gs']))
 		opAcc=0
 		sgnAcc=0
-		for j in range(warmUp,len(run)):
+
+		def work(start,end,return_dict):
+			return_dict[i] = sum(op(runs[r][2])*runs[r][1] for r in range(start,end))
+	
+		manager = multiprocessing.Manager()
+		return_dict = manager.dict()
+		bs=len(runs)//nThreads
+		job=[multiprocessing.Process(target=work, args=(t*bs,min((t+1)*bs,len(runs)),return_dict)) for t in range(nThreads)]
+		print("Progress {:2.1%}".format(i/limitNumRuns))
+		print("Starting processes..")
+		for t in job: t.start()
+		if i+1<limitNumRuns:
+			print("Preloading next run..")
+			loaded = np.load(os.path.join(path, files[i+1]))
+		print("Joining processes..")
+		for t in job: t.join()
+		res=return_dict.values()
+		for r in res:
+			opAcc+=r
+		for r in runs:
+			sgnAcc+=r[1]
+		'''
+		for j in range((len(run)-warmUp)//nThreads+1):
+			start=warmUp+j*nThreads
+			end=min(start+nThreads,len(run))
 			if showProgress:
-				print("Progress {:2.1%}".format((i*(len(run)-warmUp)+j-warmUp)/((len(run)-warmUp)*len(files))), end="\r")
-			opAcc+=op(run[j][2])
-			sgnAcc+=run[j][1]
-		weight=len(run)-warmUp
+				print("Progress {:2.1%}".format((i*(len(run)-warmUp)+j*nThreads)/((len(run)-warmUp)*limitNumRuns)), end="\r")
+			
+			def work(i,return_dict):
+				return_dict[i] = op(run[start+i][2])*run[start+i][1]
+		
+			manager = multiprocessing.Manager()
+			return_dict = manager.dict()
+			job=[multiprocessing.Process(target=work, args=(t,return_dict)) for t in range(end-start)]
+			for t in job: t.start()
+			for t in job: t.join()
+			res=return_dict.values()
+			for r in res:
+				opAcc+=r
+			#if nThreads>1:
+			#	pool.map(op, run[start:end][2])
+			#else:
+			#	opAcc+=op(run[start][2])
+			for t in range(end-start):
+				sgnAcc+=run[start+t][1]'''
+		weight=len(runs)-warmUp
 		opRes.append(opAcc/sgnAcc)
 		nConfs+=weight
 	return (np.mean(opRes,axis=0),np.std(opRes,axis=0)/np.sqrt(len(opRes)))
@@ -593,7 +690,7 @@ def getG(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nThreads,nWarmupSweeps,nSwe
 		return ag/(2*nx*ny)
 	
 	_,measurePeriod=optimizeRun(nx,ny,tx,ty,tnw,tne,U,mu,beta,m,tausPerBeta,nWarmupSweeps,[averageG],stabilize)
-
+	
 	def work(seed,return_dict):
 		ret=dqmc(nx,ny,tx,ty,tne,tnw,U,mu,beta,ntau//m,m,seed,nWarmupSweeps,nSweepsPerThread,
 			stabilize,[],observablesTD=[averageG],measurePeriod=measurePeriod)
