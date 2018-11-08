@@ -3,12 +3,11 @@ from scipy.signal import convolve2d
 from scipy.sparse.linalg import eigs, LinearOperator
 from greensFunction import *
 
-def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None):
+def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None,returnU=False):
 	kxs=np.array([[-np.pi+(i+1)*2*np.pi/Nx for i in range(Nx)],]*Ny).transpose()
 	kys=np.array([[-np.pi+(i+1)*2*np.pi/Ny for i in range(Ny)],]*Nx)
 	wsf=[greensFunction.getw(Nc,-1,T,i) for i in range(2*Nc)]
 	wsb=[greensFunction.getw(Nc,1,T,i) for i in range(2*Nc-1)]
-	print(wsf)
 	if linearized: #half filling, low energy limit
 		eps=-2*tx*(np.abs(kxs)-np.pi/2)
 	else:
@@ -16,12 +15,16 @@ def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None):
 		muu=2*tx+2*ty+2*t2
 		mul=-muu
 		ok=False
-		Npgoal=int(filling*Nx*Ny)
+		n=400
+		kxsf=np.array([[-np.pi+(i+1)*2*np.pi/n for i in range(n)],]*n).transpose()
+		kysf=np.array([[-np.pi+(i+1)*2*np.pi/n for i in range(n)],]*n)
+	
+		Npgoal=int(filling*n*n)
 		while not ok:
-			eps=-2*tx*np.cos(kxs)-2*ty*np.cos(kys)-2*t2*np.cos(kxs+kys)-mu
+			eps=-2*tx*np.cos(kxsf)-2*ty*np.cos(kysf)-2*t2*np.cos(kxsf+kysf)-mu
 			Np=(0 >= eps).sum()
 			Nh=(0 < eps).sum()
-			assert Np+Nh==Nx*Ny
+			assert Np+Nh==n*n
 			if Npgoal==Np or abs(muu-mul)<1e-9:
 				ok=True
 			if Np<Npgoal:
@@ -31,6 +34,7 @@ def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None):
 				muu=mu
 				mu=(mu+mul)/2
 
+		eps=-2*tx*np.cos(kxs)-2*ty*np.cos(kys)-2*t2*np.cos(kxs+kys)-mu
 	mu=0
 	# pl.figure(0)
 	# plotBZ(eps)
@@ -75,7 +79,10 @@ def getLambdas(Nc,Nx,Ny,tx,ty,t2,filling,T,linearized=False,U=None,St=None):
 		for tsym in [0,1]:
 			if len(lambdas[S][tsym])==0:
 				lambdas[S][tsym].append(0)
-	return lambdas
+	if returnU:
+		return lambdas, U
+	else:
+		return lambdas
 
 def gl(a):
 	Nc=a[0]

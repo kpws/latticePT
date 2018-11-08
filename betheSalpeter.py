@@ -33,7 +33,7 @@ tnw=0
 U=4
 # U=.05
 mu=0
-beta=2
+beta=4
 
 # fast for testing
 # nx=2
@@ -66,14 +66,20 @@ if clean:
 		file_path = os.path.join(folder, f)
 		if os.path.isfile(file_path):
 			os.unlink(file_path)
-if True:
+if False:
 	'''l=np.load('cache/G2G4{U}.npz'.format(U=U))
 	G4ppQ0=l['G4ppQ0']
 	G4ppQ0Err=l['G4ppQ0Err']
 	Gmom=l['Gmom']
 	GmomErr=l['GmomErr']'''
-	l=np.load('cache/all_U={U}_beta={beta}.npz'.format(U=U,beta=beta))
-	allRes=l['allRes']
+	#l=np.load('cache/all_U={U}_beta={beta}.npz'.format(U=U,beta=beta))
+	#allRes=l['allRes']
+
+	allRes=[]	
+	for i in range(3):
+		allRes.append(np.load('cache/all_U={U}_beta={beta}_{i}.npy'.format(i=i,U=U,beta=beta)))
+	allRes=zip(*allRes)
+
 	#allErr=l['allErr']
 else:
 	print("Generating field configurations..")
@@ -96,10 +102,12 @@ else:
 
 	print("Averaging over configurations..")
 	#allRes,allErr=dqmc.averageOverGFiles(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:allF(g,nTau,nx,ny),warmUp,showProgress=True,limitNumRuns=15,nThreads=30)
-	allRes=dqmc.measure(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:allF(g,nTau,nx,ny),warmUp,showProgress=True,limitNumRuns=60,nThreads=20,nBins=6)
+	allRes=dqmc.measure(nTau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,lambda g:allF(g,nTau,nx,ny),warmUp,showProgress=True,limitNumRuns=-1,nThreads=2,nBins=4)
 
 	#np.savez_compressed('cache/all_U={U}_beta={beta}.npz'.format(U=U,beta=beta), allRes=allRes,allErr=allErr)
-	np.savez_compressed('cache/all_U={U}_beta={beta}.npz'.format(U=U,beta=beta), allRes=allRes)
+	# another numpy bug... https://github.com/numpy/numpy/issues/10776
+	for i in range(3):
+		np.save('cache/all_U={U}_beta={beta}_{i}.npy'.format(i=i,U=U,beta=beta),np.array([a[i] for a in allRes]))
 
 def symmetrizeXY(a):
 	return (a+np.swapaxes(np.swapaxes(a,1,2),4,5))/2

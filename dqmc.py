@@ -546,7 +546,8 @@ def measure(ntau,nx,ny,tx,ty,tnw,tne,U,mu,beta,m,op,warmUp,showProgress=False,li
 	opRes=[]
 	nConfs=0
 		
-	if limitNumRuns==-1: limitNumRuns=len(files)	
+	if limitNumRuns==-1 or limitNumRuns>len(files):
+		limitNumRuns=len(files)
 	binSize=limitNumRuns//nBins
 	nFiles=binSize*nBins
 	if nFiles!=limitNumRuns:
